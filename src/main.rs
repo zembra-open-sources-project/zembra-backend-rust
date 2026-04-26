@@ -25,7 +25,7 @@ async fn main() -> Result<(), error::AppError> {
         .init();
 
     let settings = config::Settings::load()?;
-    let database_url = settings.database.url.as_str();
+    let database_url = settings.database.sqlite_url();
     let app = app::build_router();
     let host = Ipv4Addr::from(settings.server.host);
     let addr = SocketAddr::from((host, settings.server.port));
