@@ -1,0 +1,3 @@
+[submodule "vendor/zembra-schema"]
+	path = vendor/zembra-schema
+	url = https://github.com/gawainx/zembra-schema.git
