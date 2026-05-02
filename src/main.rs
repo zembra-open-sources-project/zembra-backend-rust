@@ -26,7 +26,8 @@ async fn main() -> Result<(), error::AppError> {
 
     let settings = config::Settings::load()?;
     let database_url = settings.database.sqlite_url();
-    let app = app::build_router();
+    let database = repositories::database::Database::connect(&database_url).await?;
+    let app = app::build_router(app::AppState { database });
     let host = Ipv4Addr::from(settings.server.host);
     let addr = SocketAddr::from((host, settings.server.port));
     let listener = tokio::net::TcpListener::bind(addr).await?;

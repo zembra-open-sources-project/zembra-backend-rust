@@ -1,12 +1,25 @@
 use axum::Router;
 
+/// Shared application state available to all handlers.
+#[derive(Debug, Clone)]
+pub struct AppState {
+    /// SQLite database handle used by repositories and health checks.
+    pub database: crate::repositories::database::Database,
+}
+
 /// Builds the root HTTP router for the backend service.
+///
+/// # Arguments
+///
+/// * `state` - Shared application state injected into route handlers.
 ///
 /// # Returns
 ///
 /// Returns an Axum router containing infrastructure routes only.
-pub fn build_router() -> Router {
-    Router::new().merge(crate::routes::health::router())
+pub fn build_router(state: AppState) -> Router {
+    Router::new()
+        .merge(crate::routes::health::router())
+        .with_state(state)
 }
 
 #[cfg(test)]
@@ -26,7 +39,12 @@ mod tests {
     ///
     /// Returns the HTTP response produced by the router.
     async fn send(request: Request<Body>) -> Response {
-        super::build_router().oneshot(request).await.unwrap()
+        let database = crate::repositories::database::Database::connect("sqlite://:memory:")
+            .await
+            .unwrap();
+        let state = super::AppState { database };
+
+        super::build_router(state).oneshot(request).await.unwrap()
     }
 
     #[tokio::test]
