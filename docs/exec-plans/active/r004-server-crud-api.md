@@ -178,7 +178,7 @@
 
 ### Task #1: 增加端到端 API 集成测试
 
-**Status:** Designed
+**Status:** Finished
 
 **Files:** Create/Modify `tests/` or inline module tests
 
@@ -190,7 +190,7 @@
 
 ### Task #2: 运行完整验证
 
-**Status:** Designed
+**Status:** Finished
 
 **Files:** Verify repository |
 
@@ -202,7 +202,7 @@
 
 ### Task #3: 更新执行记录并按 Stage 提交
 
-**Status:** Designed
+**Status:** Finished
 
 **Files:** Modify `docs/exec-plans/active/r004-server-crud-api.md`
 
@@ -224,6 +224,8 @@
 - 2026-05-02：Stage #3 已通过 `cargo fmt --check` 和 `cargo test` 验证，仓储测试覆盖创建、事务回滚、排序、更新 revision、软删除和 tag 关联。
 - 2026-05-02：完成 Stage #4，新增 `NotesService`、notes/taxonomy handlers 和 routes，注册 `/notes`、`/notes/batch`、`/fields`、`/tags` 以及 note 读写删改、归档、tags、revisions API。
 - 2026-05-02：Stage #4 已通过 `cargo fmt --check`、`cargo check` 和 `cargo test` 验证，API 测试覆盖 note 创建和统一 validation error。
+- 2026-05-02：完成 Stage #5，运行完整验证并回写执行计划状态。
+- 2026-05-02：最终验证通过：`cargo fmt --check`、`cargo check`、`cargo test`（11 passed）、`cargo clippy`。
 
 ## 约束
 
