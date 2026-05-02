@@ -1,3 +1,10 @@
+use std::collections::BTreeMap;
+
+use axum::Json;
+use axum::http::StatusCode;
+use axum::response::{IntoResponse, Response};
+use serde_json::Value;
+
 /// Application-level error type used by executable entrypoints.
 #[derive(Debug, thiserror::Error)]
 pub enum AppError {
@@ -10,4 +17,91 @@ pub enum AppError {
     /// TCP socket binding failed.
     #[error("io error: {0}")]
     Io(#[from] std::io::Error),
+}
+
+/// HTTP API error type converted into JSON responses.
+#[derive(Debug, thiserror::Error)]
+pub enum ApiError {
+    /// Request JSON was syntactically invalid.
+    #[error("Invalid JSON request body.")]
+    InvalidJson,
+    /// Request validation failed.
+    #[error("Request validation failed.")]
+    Validation,
+    /// Note reference is too short to resolve safely.
+    #[error("Note reference must be at least 4 characters.")]
+    NoteReferenceTooShort,
+    /// Note reference contains non-hex characters.
+    #[error("Note reference must be a hexadecimal string.")]
+    InvalidNoteReference,
+    /// Requested record was not found.
+    #[error("{0}")]
+    RecordNotFound(String),
+    /// Note reference matched multiple records.
+    #[error("{0}")]
+    AmbiguousNoteReference(String),
+    /// Database is not available for serving requests.
+    #[error("Database is not initialized.")]
+    DatabaseNotInitialized,
+    /// SQLite operation failed.
+    #[error("Database operation failed.")]
+    Database(#[from] sqlx::Error),
+}
+
+impl ApiError {
+    /// Returns the HTTP status code for this API error.
+    ///
+    /// # Returns
+    ///
+    /// Returns a status code aligned with the public error contract.
+    pub fn status_code(&self) -> StatusCode {
+        match self {
+            Self::InvalidJson => StatusCode::BAD_REQUEST,
+            Self::Validation | Self::NoteReferenceTooShort | Self::InvalidNoteReference => {
+                StatusCode::UNPROCESSABLE_ENTITY
+            }
+            Self::RecordNotFound(_) => StatusCode::NOT_FOUND,
+            Self::AmbiguousNoteReference(_) => StatusCode::CONFLICT,
+            Self::DatabaseNotInitialized => StatusCode::SERVICE_UNAVAILABLE,
+            Self::Database(_) => StatusCode::INTERNAL_SERVER_ERROR,
+        }
+    }
+
+    /// Returns the machine-readable error code for this API error.
+    ///
+    /// # Returns
+    ///
+    /// Returns a stable error code for clients.
+    pub fn code(&self) -> &'static str {
+        match self {
+            Self::InvalidJson => "invalid_json",
+            Self::Validation => "validation_error",
+            Self::NoteReferenceTooShort => "note_reference_too_short",
+            Self::InvalidNoteReference => "invalid_note_reference",
+            Self::RecordNotFound(_) => "record_not_found",
+            Self::AmbiguousNoteReference(_) => "ambiguous_note_reference",
+            Self::DatabaseNotInitialized => "database_not_initialized",
+            Self::Database(_) => "database_error",
+        }
+    }
+}
+
+impl IntoResponse for ApiError {
+    /// Converts an API error into a JSON HTTP response.
+    ///
+    /// # Returns
+    ///
+    /// Returns a response with the error contract body and matching status code.
+    fn into_response(self) -> Response {
+        let status = self.status_code();
+        let body = crate::dto::error::ErrorResponse {
+            error: crate::dto::error::ErrorBody {
+                code: self.code().to_string(),
+                message: self.to_string(),
+                details: BTreeMap::<String, Value>::new(),
+            },
+        };
+
+        (status, Json(body)).into_response()
+    }
 }

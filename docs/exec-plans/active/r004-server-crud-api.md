@@ -52,7 +52,7 @@
 
 ### Task #1: 定义数据库模型
 
-**Status:** Designed
+**Status:** Finished
 
 **Files:** Create/Modify `src/models/mod.rs`, `src/models/note.rs`, `src/models/field.rs`, `src/models/tag.rs`, `src/models/revision.rs`
 
@@ -64,7 +64,7 @@
 
 ### Task #2: 定义 API DTO
 
-**Status:** Designed
+**Status:** Finished
 
 **Files:** Create/Modify `src/dto/mod.rs`, `src/dto/notes.rs`, `src/dto/taxonomy.rs`, `src/dto/error.rs`
 
@@ -76,7 +76,7 @@
 
 ### Task #3: 统一 API 错误映射
 
-**Status:** Designed
+**Status:** Finished
 
 **Files:** Modify `src/error.rs`; Create `src/error/api.rs` if needed
 
@@ -218,6 +218,8 @@
 - 2026-05-02：落地 Server CRUD API 设计文档和开发计划，等待进入编码阶段。
 - 2026-05-02：完成 Stage #1，新增 `Database` 连接池封装，启动时执行 v0.2.0 shared schema migration，`AppState` 注入 Axum router，并扩展 `/health` 返回 `service` 和 `database_initialized`。
 - 2026-05-02：Stage #1 已通过 `cargo check` 和 `cargo test` 验证。
+- 2026-05-02：完成 Stage #2，新增 v0.2.0 schema 对应的 note、field、tag、revision 模型，补齐 notes/taxonomy/error DTO，并新增 `ApiError` 到 JSON 错误响应的映射。
+- 2026-05-02：Stage #2 已通过 `cargo fmt --check` 和 `cargo check` 验证；当前类型尚未接入业务调用，存在未使用 warning，后续 Stage 接线后处理。
 
 ## 约束
 
