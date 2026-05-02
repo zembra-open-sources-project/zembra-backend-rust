@@ -90,7 +90,7 @@
 
 ### Task #1: 实现 field/tag 查询或创建
 
-**Status:** Designed
+**Status:** Finished
 
 **Files:** Create/Modify `src/repositories/mod.rs`, `src/repositories/taxonomy.rs`
 
@@ -102,7 +102,7 @@
 
 ### Task #2: 实现 note 创建和批量创建事务
 
-**Status:** Designed
+**Status:** Finished
 
 **Files:** Create/Modify `src/repositories/notes.rs`, `src/repositories/revisions.rs`, `src/repositories/taxonomy.rs`
 
@@ -114,7 +114,7 @@
 
 ### Task #3: 实现 note 查询、更新、归档和软删除
 
-**Status:** Designed
+**Status:** Finished
 
 **Files:** Modify `src/repositories/notes.rs`, `src/repositories/revisions.rs`
 
@@ -126,7 +126,7 @@
 
 ### Task #4: 实现 note tag 关联维护
 
-**Status:** Designed
+**Status:** Finished
 
 **Files:** Modify `src/repositories/taxonomy.rs`, `src/repositories/notes.rs`
 
@@ -220,6 +220,8 @@
 - 2026-05-02：Stage #1 已通过 `cargo check` 和 `cargo test` 验证。
 - 2026-05-02：完成 Stage #2，新增 v0.2.0 schema 对应的 note、field、tag、revision 模型，补齐 notes/taxonomy/error DTO，并新增 `ApiError` 到 JSON 错误响应的映射。
 - 2026-05-02：Stage #2 已通过 `cargo fmt --check` 和 `cargo check` 验证；当前类型尚未接入业务调用，存在未使用 warning，后续 Stage 接线后处理。
+- 2026-05-02：完成 Stage #3，新增 `NotesRepository` 和 `TaxonomyRepository`，实现 field/tag 查询或创建、note 单条/批量创建事务、note ref 查询、更新 revision、归档、软删除、revisions 查询和 note tag 关联维护。
+- 2026-05-02：Stage #3 已通过 `cargo fmt --check` 和 `cargo test` 验证，仓储测试覆盖创建、事务回滚、排序、更新 revision、软删除和 tag 关联。
 
 ## 约束
 
