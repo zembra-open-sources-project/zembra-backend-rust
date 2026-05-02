@@ -13,6 +13,21 @@ pub struct ListTaxonomyQuery {
     pub all: Option<bool>,
 }
 
+impl ListTaxonomyQuery {
+    /// Resolves the SQL limit for this query.
+    ///
+    /// # Returns
+    ///
+    /// Returns `None` when all records should be returned.
+    pub fn resolved_limit(&self) -> Option<i64> {
+        if self.all.unwrap_or(false) {
+            None
+        } else {
+            Some(self.limit.unwrap_or(5))
+        }
+    }
+}
+
 /// Response body for listing fields.
 #[derive(Debug, Clone, Serialize, ToSchema)]
 pub struct ListFieldsResponse {

@@ -41,6 +41,7 @@ pub enum ApiError {
     #[error("{0}")]
     AmbiguousNoteReference(String),
     /// Database is not available for serving requests.
+    #[allow(dead_code)]
     #[error("Database is not initialized.")]
     DatabaseNotInitialized,
     /// SQLite operation failed.

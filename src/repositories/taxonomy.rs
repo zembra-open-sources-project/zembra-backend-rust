@@ -34,6 +34,7 @@ impl TaxonomyRepository {
     /// # Returns
     ///
     /// Returns the persisted field record.
+    #[allow(dead_code)]
     pub async fn get_or_create_field(&self, name: &str) -> Result<FieldRecord, sqlx::Error> {
         let mut transaction = self.pool.begin().await?;
         let field = get_or_create_field_in_transaction(&mut transaction, name).await?;
@@ -51,6 +52,7 @@ impl TaxonomyRepository {
     /// # Returns
     ///
     /// Returns the persisted tag record.
+    #[allow(dead_code)]
     pub async fn get_or_create_tag(&self, name: &str) -> Result<TagRecord, sqlx::Error> {
         let mut transaction = self.pool.begin().await?;
         let tag = get_or_create_tag_in_transaction(&mut transaction, name).await?;

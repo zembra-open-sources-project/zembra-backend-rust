@@ -3,6 +3,8 @@ use utoipa::ToSchema;
 use validator::Validate;
 
 use crate::models::note::NoteRecord;
+use crate::models::revision::NoteRevisionRecord;
+use crate::models::tag::TagRecord;
 
 /// Request body for creating a single note.
 #[derive(Debug, Clone, Deserialize, Validate, ToSchema)]
@@ -44,6 +46,27 @@ pub struct NoteResponse {
 pub struct BatchCreateNotesResponse {
     /// Created notes and metadata.
     pub notes: Vec<NoteResponse>,
+}
+
+/// Response body for listing notes.
+#[derive(Debug, Clone, Serialize, ToSchema)]
+pub struct ListNotesResponse {
+    /// Note records.
+    pub notes: Vec<NoteRecord>,
+}
+
+/// Response body for listing note revisions.
+#[derive(Debug, Clone, Serialize, ToSchema)]
+pub struct ListNoteRevisionsResponse {
+    /// Note revision records.
+    pub revisions: Vec<NoteRevisionRecord>,
+}
+
+/// Response body for listing note tags.
+#[derive(Debug, Clone, Serialize, ToSchema)]
+pub struct ListNoteTagsResponse {
+    /// Tag records associated with the note.
+    pub tags: Vec<TagRecord>,
 }
 
 /// User-facing metadata associated with a note response.

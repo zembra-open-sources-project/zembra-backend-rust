@@ -140,7 +140,7 @@
 
 ### Task #1: 实现 NotesService
 
-**Status:** Designed
+**Status:** Finished
 
 **Files:** Create/Modify `src/services/mod.rs`, `src/services/notes.rs`
 
@@ -152,7 +152,7 @@
 
 ### Task #2: 实现 Notes/Fields/Tags handlers
 
-**Status:** Designed
+**Status:** Finished
 
 **Files:** Create/Modify `src/handlers/notes.rs`, `src/handlers/taxonomy.rs`, `src/routes/notes.rs`, `src/routes/taxonomy.rs`
 
@@ -164,7 +164,7 @@
 
 ### Task #3: 注册路由和 OpenAPI 注解
 
-**Status:** Designed
+**Status:** Finished
 
 **Files:** Modify `src/app.rs`, `src/routes/mod.rs`, `src/handlers/mod.rs`, `src/dto/*`
 
@@ -222,6 +222,8 @@
 - 2026-05-02：Stage #2 已通过 `cargo fmt --check` 和 `cargo check` 验证；当前类型尚未接入业务调用，存在未使用 warning，后续 Stage 接线后处理。
 - 2026-05-02：完成 Stage #3，新增 `NotesRepository` 和 `TaxonomyRepository`，实现 field/tag 查询或创建、note 单条/批量创建事务、note ref 查询、更新 revision、归档、软删除、revisions 查询和 note tag 关联维护。
 - 2026-05-02：Stage #3 已通过 `cargo fmt --check` 和 `cargo test` 验证，仓储测试覆盖创建、事务回滚、排序、更新 revision、软删除和 tag 关联。
+- 2026-05-02：完成 Stage #4，新增 `NotesService`、notes/taxonomy handlers 和 routes，注册 `/notes`、`/notes/batch`、`/fields`、`/tags` 以及 note 读写删改、归档、tags、revisions API。
+- 2026-05-02：Stage #4 已通过 `cargo fmt --check`、`cargo check` 和 `cargo test` 验证，API 测试覆盖 note 创建和统一 validation error。
 
 ## 约束
 
