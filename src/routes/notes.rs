@@ -12,6 +12,7 @@ pub fn router() -> Router<crate::app::AppState> {
             "/notes",
             get(crate::handlers::notes::list_notes).post(crate::handlers::notes::create_note),
         )
+        .route("/notes/recent", post(crate::handlers::notes::recent_notes))
         .route(
             "/notes/batch",
             post(crate::handlers::notes::create_notes_batch),

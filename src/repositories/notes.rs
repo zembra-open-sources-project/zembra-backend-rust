@@ -118,6 +118,26 @@ impl NotesRepository {
         .map_err(ApiError::from)
     }
 
+    /// Lists recent active notes ordered by update time descending.
+    ///
+    /// # Arguments
+    ///
+    /// * `limit` - Maximum record count.
+    ///
+    /// # Returns
+    ///
+    /// Returns non-deleted and non-archived note records.
+    pub async fn list_recent_notes(&self, limit: i64) -> Result<Vec<NoteRecord>, ApiError> {
+        sqlx::query_as::<_, NoteRecord>(
+            "SELECT id, content, role, field_id, created_at, updated_at, archived_at, deleted_at, current_revision_id \
+             FROM notes WHERE deleted_at IS NULL AND archived_at IS NULL ORDER BY updated_at DESC LIMIT ?",
+        )
+        .bind(limit)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(ApiError::from)
+    }
+
     /// Resolves a note by full ID or unique hexadecimal prefix.
     ///
     /// # Arguments
@@ -629,5 +649,62 @@ mod tests {
             tags.iter().map(|tag| tag.name.as_str()).collect::<Vec<_>>(),
             vec!["sqlite"]
         );
+    }
+
+    #[tokio::test]
+    async fn list_recent_notes_orders_and_filters_hidden_records() {
+        let repository = notes_repository().await;
+        let oldest = repository.create_note(input("oldest")).await.unwrap();
+        let archived = repository.create_note(input("archived")).await.unwrap();
+        let deleted = repository.create_note(input("deleted")).await.unwrap();
+        let newest = repository.create_note(input("newest")).await.unwrap();
+
+        sqlx::query("UPDATE notes SET updated_at = ? WHERE id = ?")
+            .bind(2_000_000_010_i64)
+            .bind(&oldest.note.id)
+            .execute(&repository.pool)
+            .await
+            .unwrap();
+        sqlx::query("UPDATE notes SET updated_at = ? WHERE id = ?")
+            .bind(2_000_000_040_i64)
+            .bind(&archived.note.id)
+            .execute(&repository.pool)
+            .await
+            .unwrap();
+        sqlx::query("UPDATE notes SET updated_at = ? WHERE id = ?")
+            .bind(2_000_000_030_i64)
+            .bind(&deleted.note.id)
+            .execute(&repository.pool)
+            .await
+            .unwrap();
+        sqlx::query("UPDATE notes SET updated_at = ? WHERE id = ?")
+            .bind(2_000_000_020_i64)
+            .bind(&newest.note.id)
+            .execute(&repository.pool)
+            .await
+            .unwrap();
+        repository.archive_note(&archived.note.id).await.unwrap();
+        repository.delete_note(&deleted.note.id).await.unwrap();
+
+        let recent = repository.list_recent_notes(10).await.unwrap();
+
+        assert_eq!(
+            recent
+                .iter()
+                .map(|note| note.content.as_str())
+                .collect::<Vec<_>>(),
+            vec!["newest", "oldest"]
+        );
+    }
+
+    #[tokio::test]
+    async fn list_recent_notes_applies_limit() {
+        let repository = notes_repository().await;
+        repository.create_note(input("first")).await.unwrap();
+        repository.create_note(input("second")).await.unwrap();
+
+        let recent = repository.list_recent_notes(1).await.unwrap();
+
+        assert_eq!(recent.len(), 1);
     }
 }

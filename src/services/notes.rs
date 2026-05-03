@@ -1,7 +1,8 @@
 use sqlx::SqlitePool;
 
 use crate::dto::notes::{
-    BatchCreateNotesResponse, CreateNoteRequest, NoteMetadata, NoteResponse, UpdateNoteRequest,
+    BatchCreateNotesResponse, CreateNoteRequest, NoteMetadata, NoteResponse, RecentNotesRequest,
+    UpdateNoteRequest,
 };
 use crate::error::ApiError;
 use crate::models::note::NoteRecord;
@@ -87,6 +88,23 @@ impl NotesService {
     /// Returns active note records.
     pub async fn list_notes(&self, limit: Option<i64>) -> Result<Vec<NoteRecord>, ApiError> {
         self.repository.list_notes(limit).await
+    }
+
+    /// Lists recent notes for Web presentation.
+    ///
+    /// # Arguments
+    ///
+    /// * `request` - Validated recent-notes request.
+    ///
+    /// # Returns
+    ///
+    /// Returns non-deleted and non-archived note records ordered by update time.
+    pub async fn recent_notes(
+        &self,
+        request: RecentNotesRequest,
+    ) -> Result<Vec<NoteRecord>, ApiError> {
+        let limit = request.limit.unwrap_or(50);
+        self.repository.list_recent_notes(limit).await
     }
 
     /// Reads a note by reference.

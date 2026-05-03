@@ -7,7 +7,7 @@ use validator::Validate;
 use crate::dto::notes::{
     BatchCreateNotesRequest, BatchCreateNotesResponse, CreateNoteRequest,
     ListNoteRevisionsResponse, ListNoteTagsResponse, ListNotesQuery, ListNotesResponse,
-    NoteResponse, UpdateNoteRequest,
+    NoteResponse, RecentNotesRequest, UpdateNoteRequest,
 };
 use crate::error::ApiError;
 use crate::services::notes::NotesService;
@@ -38,6 +38,41 @@ pub async fn list_notes(
 ) -> Result<Json<ListNotesResponse>, ApiError> {
     let service = NotesService::new(state.database.pool);
     let notes = service.list_notes(query.limit).await?;
+
+    Ok(Json(ListNotesResponse { notes }))
+}
+
+/// Lists recent notes for Web presentation.
+///
+/// # Arguments
+///
+/// * `state` - Shared application state.
+/// * `payload` - JSON request body.
+///
+/// # Returns
+///
+/// Returns non-deleted and non-archived notes ordered by update time.
+#[utoipa::path(
+    post,
+    path = "/notes/recent",
+    tag = "notes",
+    request_body = RecentNotesRequest,
+    responses(
+        (status = 200, description = "Recent non-archived notes ordered by update time", body = ListNotesResponse),
+        (status = 400, description = "Invalid JSON", body = crate::dto::error::ErrorResponse),
+        (status = 422, description = "Validation error", body = crate::dto::error::ErrorResponse),
+        (status = 500, description = "Database error", body = crate::dto::error::ErrorResponse)
+    )
+)]
+pub async fn recent_notes(
+    State(state): State<crate::app::AppState>,
+    payload: Result<Json<RecentNotesRequest>, JsonRejection>,
+) -> Result<Json<ListNotesResponse>, ApiError> {
+    let Json(request) = payload.map_err(|_| ApiError::InvalidJson)?;
+    request.validate().map_err(|_| ApiError::Validation)?;
+
+    let service = NotesService::new(state.database.pool);
+    let notes = service.recent_notes(request).await?;
 
     Ok(Json(ListNotesResponse { notes }))
 }

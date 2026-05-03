@@ -6,6 +6,7 @@ use utoipa::OpenApi;
     paths(
         crate::handlers::health::health,
         crate::handlers::notes::list_notes,
+        crate::handlers::notes::recent_notes,
         crate::handlers::notes::create_note,
         crate::handlers::notes::create_notes_batch,
         crate::handlers::notes::get_note,
@@ -31,6 +32,7 @@ use utoipa::OpenApi;
             crate::dto::notes::ListNotesResponse,
             crate::dto::notes::NoteMetadata,
             crate::dto::notes::NoteResponse,
+            crate::dto::notes::RecentNotesRequest,
             crate::dto::notes::UpdateNoteRequest,
             crate::dto::taxonomy::ListFieldsResponse,
             crate::dto::taxonomy::ListTagsResponse,

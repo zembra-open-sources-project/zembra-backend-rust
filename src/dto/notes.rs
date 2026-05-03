@@ -13,6 +13,14 @@ pub struct ListNotesQuery {
     pub limit: Option<i64>,
 }
 
+/// Request body used by the recent notes endpoint.
+#[derive(Debug, Clone, Deserialize, Validate, ToSchema)]
+pub struct RecentNotesRequest {
+    /// Maximum number of notes to return.
+    #[validate(range(min = 1, max = 100))]
+    pub limit: Option<i64>,
+}
+
 /// Request body for creating a single note.
 #[derive(Debug, Clone, Deserialize, Validate, ToSchema)]
 pub struct CreateNoteRequest {

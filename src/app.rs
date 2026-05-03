@@ -38,6 +38,19 @@ mod tests {
     use serde_json::{Value, json};
     use tower::ServiceExt;
 
+    /// Creates application state backed by an in-memory database.
+    ///
+    /// # Returns
+    ///
+    /// Returns test application state with migrated SQLite schema.
+    async fn test_state() -> super::AppState {
+        let database = crate::repositories::database::Database::connect("sqlite://:memory:")
+            .await
+            .unwrap();
+
+        super::AppState { database }
+    }
+
     /// Sends a request to the application router in tests.
     ///
     /// # Arguments
@@ -48,12 +61,63 @@ mod tests {
     ///
     /// Returns the HTTP response produced by the router.
     async fn send(request: Request<Body>) -> Response {
-        let database = crate::repositories::database::Database::connect("sqlite://:memory:")
+        send_with_state(test_state().await, request).await
+    }
+
+    /// Sends a request to the application router with explicit state.
+    ///
+    /// # Arguments
+    ///
+    /// * `state` - Shared application state for the router.
+    /// * `request` - HTTP request to dispatch through the router.
+    ///
+    /// # Returns
+    ///
+    /// Returns the HTTP response produced by the router.
+    async fn send_with_state(state: super::AppState, request: Request<Body>) -> Response {
+        super::build_router(state).oneshot(request).await.unwrap()
+    }
+
+    /// Creates a note through the notes service.
+    ///
+    /// # Arguments
+    ///
+    /// * `state` - Shared application state.
+    /// * `content` - Note body content.
+    ///
+    /// # Returns
+    ///
+    /// Returns the created note ID.
+    async fn create_note(state: &super::AppState, content: &str) -> String {
+        let service = crate::services::notes::NotesService::new(state.database.pool.clone());
+        service
+            .create_note(crate::dto::notes::CreateNoteRequest {
+                content: content.to_string(),
+                field: None,
+                tags: Vec::new(),
+                role: "Human".to_string(),
+                device_id: None,
+            })
+            .await
+            .unwrap()
+            .note
+            .id
+    }
+
+    /// Updates a note timestamp directly for deterministic ordering tests.
+    ///
+    /// # Arguments
+    ///
+    /// * `state` - Shared application state.
+    /// * `note_id` - Note ID to update.
+    /// * `updated_at` - Timestamp value to write.
+    async fn set_updated_at(state: &super::AppState, note_id: &str, updated_at: i64) {
+        sqlx::query("UPDATE notes SET updated_at = ? WHERE id = ?")
+            .bind(updated_at)
+            .bind(note_id)
+            .execute(&state.database.pool)
             .await
             .unwrap();
-        let state = super::AppState { database };
-
-        super::build_router(state).oneshot(request).await.unwrap()
     }
 
     /// Reads a response body as JSON.
@@ -151,9 +215,86 @@ mod tests {
         assert_eq!(status, StatusCode::OK);
         assert!(body["paths"].get("/health").is_some());
         assert!(body["paths"].get("/notes").is_some());
+        assert!(body["paths"].get("/notes/recent").is_some());
         assert!(body["paths"].get("/notes/batch").is_some());
         assert!(body["paths"].get("/fields").is_some());
         assert!(body["paths"].get("/tags").is_some());
+    }
+
+    #[tokio::test]
+    async fn recent_notes_route_returns_ordered_visible_notes() {
+        let state = test_state().await;
+        let old = create_note(&state, "old").await;
+        let archived = create_note(&state, "archived").await;
+        let deleted = create_note(&state, "deleted").await;
+        let new = create_note(&state, "new").await;
+        set_updated_at(&state, &old, 2_000_000_010).await;
+        set_updated_at(&state, &archived, 2_000_000_040).await;
+        set_updated_at(&state, &deleted, 2_000_000_030).await;
+        set_updated_at(&state, &new, 2_000_000_020).await;
+
+        let service = crate::services::notes::NotesService::new(state.database.pool.clone());
+        service.archive_note(&archived).await.unwrap();
+        service.delete_note(&deleted).await.unwrap();
+
+        let response = send_with_state(
+            state,
+            Request::builder()
+                .method("POST")
+                .uri("/notes/recent")
+                .header("content-type", "application/json")
+                .body(Body::from(json!({"limit": 10}).to_string()))
+                .unwrap(),
+        )
+        .await;
+        let status = response.status();
+        let body = response_json(response).await;
+
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(body["notes"][0]["content"], "new");
+        assert_eq!(body["notes"][1]["content"], "old");
+        assert_eq!(body["notes"].as_array().unwrap().len(), 2);
+    }
+
+    #[tokio::test]
+    async fn recent_notes_route_uses_default_and_custom_limit() {
+        let state = test_state().await;
+        create_note(&state, "first").await;
+        create_note(&state, "second").await;
+
+        let response = send_with_state(
+            state,
+            Request::builder()
+                .method("POST")
+                .uri("/notes/recent")
+                .header("content-type", "application/json")
+                .body(Body::from(json!({ "limit": 1 }).to_string()))
+                .unwrap(),
+        )
+        .await;
+        let status = response.status();
+        let body = response_json(response).await;
+
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(body["notes"].as_array().unwrap().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn recent_notes_route_rejects_invalid_limit() {
+        let response = send(
+            Request::builder()
+                .method("POST")
+                .uri("/notes/recent")
+                .header("content-type", "application/json")
+                .body(Body::from(json!({ "limit": 101 }).to_string()))
+                .unwrap(),
+        )
+        .await;
+        let status = response.status();
+        let body = response_json(response).await;
+
+        assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+        assert_eq!(body["error"]["code"], "validation_error");
     }
 
     #[tokio::test]
