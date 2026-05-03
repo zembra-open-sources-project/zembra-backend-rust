@@ -123,19 +123,70 @@ impl NotesRepository {
     /// # Arguments
     ///
     /// * `limit` - Maximum record count.
+    /// * `note_uuid` - Optional full note ID used as a cursor.
     ///
     /// # Returns
     ///
     /// Returns non-deleted and non-archived note records.
-    pub async fn list_recent_notes(&self, limit: i64) -> Result<Vec<NoteRecord>, ApiError> {
+    pub async fn list_recent_notes(
+        &self,
+        limit: i64,
+        note_uuid: Option<&str>,
+    ) -> Result<Vec<NoteRecord>, ApiError> {
+        match note_uuid {
+            Some(note_uuid) => {
+                validate_full_note_uuid(note_uuid)?;
+                let cursor = self.get_visible_note_by_id(note_uuid).await?;
+
+                sqlx::query_as::<_, NoteRecord>(
+                    "SELECT id, content, role, field_id, created_at, updated_at, archived_at, deleted_at, current_revision_id \
+                     FROM notes \
+                     WHERE deleted_at IS NULL \
+                     AND archived_at IS NULL \
+                     AND (updated_at < ? OR (updated_at = ? AND id < ?)) \
+                     ORDER BY updated_at DESC, id DESC LIMIT ?",
+                )
+                .bind(cursor.updated_at)
+                .bind(cursor.updated_at)
+                .bind(&cursor.id)
+                .bind(limit)
+                .fetch_all(&self.pool)
+                .await
+                .map_err(ApiError::from)
+            }
+            None => sqlx::query_as::<_, NoteRecord>(
+                "SELECT id, content, role, field_id, created_at, updated_at, archived_at, deleted_at, current_revision_id \
+                 FROM notes WHERE deleted_at IS NULL AND archived_at IS NULL ORDER BY updated_at DESC, id DESC LIMIT ?",
+            )
+            .bind(limit)
+            .fetch_all(&self.pool)
+            .await
+            .map_err(ApiError::from),
+        }
+    }
+
+    /// Reads a visible note by exact ID.
+    ///
+    /// # Arguments
+    ///
+    /// * `note_id` - Full note ID.
+    ///
+    /// # Returns
+    ///
+    /// Returns the matching non-deleted and non-archived note.
+    async fn get_visible_note_by_id(&self, note_id: &str) -> Result<NoteRecord, ApiError> {
         sqlx::query_as::<_, NoteRecord>(
             "SELECT id, content, role, field_id, created_at, updated_at, archived_at, deleted_at, current_revision_id \
-             FROM notes WHERE deleted_at IS NULL AND archived_at IS NULL ORDER BY updated_at DESC LIMIT ?",
+             FROM notes WHERE id = ? AND deleted_at IS NULL AND archived_at IS NULL",
         )
-        .bind(limit)
-        .fetch_all(&self.pool)
-        .await
-        .map_err(ApiError::from)
+        .bind(note_id)
+        .fetch_optional(&self.pool)
+        .await?
+        .ok_or_else(|| {
+            ApiError::RecordNotFound(format!(
+                "Note cursor \"{note_id}\" did not match any visible note."
+            ))
+        })
     }
 
     /// Resolves a note by full ID or unique hexadecimal prefix.
@@ -482,6 +533,30 @@ fn validate_note_ref(note_ref: &str) -> Result<(), ApiError> {
     Ok(())
 }
 
+/// Validates a full note UUID before cursor lookup.
+///
+/// # Arguments
+///
+/// * `note_uuid` - Full note ID.
+///
+/// # Returns
+///
+/// Returns `Ok(())` when the UUID is a 32-character hexadecimal string.
+fn validate_full_note_uuid(note_uuid: &str) -> Result<(), ApiError> {
+    if note_uuid.len() != 32 {
+        return Err(ApiError::Validation);
+    }
+
+    if !note_uuid
+        .chars()
+        .all(|character| character.is_ascii_hexdigit())
+    {
+        return Err(ApiError::Validation);
+    }
+
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::{CreateNoteInput, NotesRepository};
@@ -686,7 +761,7 @@ mod tests {
         repository.archive_note(&archived.note.id).await.unwrap();
         repository.delete_note(&deleted.note.id).await.unwrap();
 
-        let recent = repository.list_recent_notes(10).await.unwrap();
+        let recent = repository.list_recent_notes(10, None).await.unwrap();
 
         assert_eq!(
             recent
@@ -703,8 +778,110 @@ mod tests {
         repository.create_note(input("first")).await.unwrap();
         repository.create_note(input("second")).await.unwrap();
 
-        let recent = repository.list_recent_notes(1).await.unwrap();
+        let recent = repository.list_recent_notes(1, None).await.unwrap();
 
         assert_eq!(recent.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn list_recent_notes_uses_full_note_uuid_cursor() {
+        let repository = notes_repository().await;
+        let oldest = repository.create_note(input("oldest")).await.unwrap();
+        let cursor = repository.create_note(input("cursor")).await.unwrap();
+        let newest = repository.create_note(input("newest")).await.unwrap();
+
+        sqlx::query("UPDATE notes SET updated_at = ? WHERE id = ?")
+            .bind(2_000_000_010_i64)
+            .bind(&oldest.note.id)
+            .execute(&repository.pool)
+            .await
+            .unwrap();
+        sqlx::query("UPDATE notes SET updated_at = ? WHERE id = ?")
+            .bind(2_000_000_020_i64)
+            .bind(&cursor.note.id)
+            .execute(&repository.pool)
+            .await
+            .unwrap();
+        sqlx::query("UPDATE notes SET updated_at = ? WHERE id = ?")
+            .bind(2_000_000_030_i64)
+            .bind(&newest.note.id)
+            .execute(&repository.pool)
+            .await
+            .unwrap();
+
+        let recent = repository
+            .list_recent_notes(10, Some(&cursor.note.id))
+            .await
+            .unwrap();
+
+        assert_eq!(
+            recent
+                .iter()
+                .map(|note| note.content.as_str())
+                .collect::<Vec<_>>(),
+            vec!["oldest"]
+        );
+    }
+
+    #[tokio::test]
+    async fn list_recent_notes_uses_id_tiebreaker_for_cursor() {
+        let repository = notes_repository().await;
+        let low_id = repository.create_note(input("low")).await.unwrap();
+        let cursor_id = repository.create_note(input("cursor")).await.unwrap();
+        let high_id = repository.create_note(input("high")).await.unwrap();
+
+        sqlx::query("UPDATE notes SET id = ?, updated_at = ? WHERE id = ?")
+            .bind("10000000000000000000000000000000")
+            .bind(2_000_000_010_i64)
+            .bind(&low_id.note.id)
+            .execute(&repository.pool)
+            .await
+            .unwrap();
+        sqlx::query("UPDATE notes SET id = ?, updated_at = ? WHERE id = ?")
+            .bind("20000000000000000000000000000000")
+            .bind(2_000_000_010_i64)
+            .bind(&cursor_id.note.id)
+            .execute(&repository.pool)
+            .await
+            .unwrap();
+        sqlx::query("UPDATE notes SET id = ?, updated_at = ? WHERE id = ?")
+            .bind("30000000000000000000000000000000")
+            .bind(2_000_000_010_i64)
+            .bind(&high_id.note.id)
+            .execute(&repository.pool)
+            .await
+            .unwrap();
+
+        let recent = repository
+            .list_recent_notes(10, Some("20000000000000000000000000000000"))
+            .await
+            .unwrap();
+
+        assert_eq!(
+            recent
+                .iter()
+                .map(|note| note.content.as_str())
+                .collect::<Vec<_>>(),
+            vec!["low"]
+        );
+    }
+
+    #[tokio::test]
+    async fn list_recent_notes_rejects_invalid_or_hidden_cursor() {
+        let repository = notes_repository().await;
+        let archived = repository.create_note(input("archived")).await.unwrap();
+        repository.archive_note(&archived.note.id).await.unwrap();
+
+        let invalid = repository.list_recent_notes(10, Some("abcd")).await;
+        let hidden = repository
+            .list_recent_notes(10, Some(&archived.note.id))
+            .await;
+        let missing = repository
+            .list_recent_notes(10, Some("ffffffffffffffffffffffffffffffff"))
+            .await;
+
+        assert!(matches!(invalid, Err(ApiError::Validation)));
+        assert!(matches!(hidden, Err(ApiError::RecordNotFound(_))));
+        assert!(matches!(missing, Err(ApiError::RecordNotFound(_))));
     }
 }

@@ -280,6 +280,40 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn recent_notes_route_uses_note_uuid_cursor() {
+        let state = test_state().await;
+        let old = create_note(&state, "old").await;
+        let cursor = create_note(&state, "cursor").await;
+        let new = create_note(&state, "new").await;
+        set_updated_at(&state, &old, 2_000_000_010).await;
+        set_updated_at(&state, &cursor, 2_000_000_020).await;
+        set_updated_at(&state, &new, 2_000_000_030).await;
+
+        let response = send_with_state(
+            state,
+            Request::builder()
+                .method("POST")
+                .uri("/notes/recent")
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    json!({
+                        "limit": 10,
+                        "note_uuid": cursor
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await;
+        let status = response.status();
+        let body = response_json(response).await;
+
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(body["notes"].as_array().unwrap().len(), 1);
+        assert_eq!(body["notes"][0]["content"], "old");
+    }
+
+    #[tokio::test]
     async fn recent_notes_route_rejects_invalid_limit() {
         let response = send(
             Request::builder()
@@ -295,6 +329,48 @@ mod tests {
 
         assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
         assert_eq!(body["error"]["code"], "validation_error");
+    }
+
+    #[tokio::test]
+    async fn recent_notes_route_rejects_invalid_note_uuid() {
+        let response = send(
+            Request::builder()
+                .method("POST")
+                .uri("/notes/recent")
+                .header("content-type", "application/json")
+                .body(Body::from(json!({ "note_uuid": "abcd" }).to_string()))
+                .unwrap(),
+        )
+        .await;
+        let status = response.status();
+        let body = response_json(response).await;
+
+        assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+        assert_eq!(body["error"]["code"], "validation_error");
+    }
+
+    #[tokio::test]
+    async fn recent_notes_route_returns_not_found_for_hidden_note_uuid() {
+        let state = test_state().await;
+        let archived = create_note(&state, "archived").await;
+        let service = crate::services::notes::NotesService::new(state.database.pool.clone());
+        service.archive_note(&archived).await.unwrap();
+
+        let response = send_with_state(
+            state,
+            Request::builder()
+                .method("POST")
+                .uri("/notes/recent")
+                .header("content-type", "application/json")
+                .body(Body::from(json!({ "note_uuid": archived }).to_string()))
+                .unwrap(),
+        )
+        .await;
+        let status = response.status();
+        let body = response_json(response).await;
+
+        assert_eq!(status, StatusCode::NOT_FOUND);
+        assert_eq!(body["error"]["code"], "record_not_found");
     }
 
     #[tokio::test]

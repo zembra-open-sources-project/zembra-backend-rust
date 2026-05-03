@@ -104,7 +104,9 @@ impl NotesService {
         request: RecentNotesRequest,
     ) -> Result<Vec<NoteRecord>, ApiError> {
         let limit = request.limit.unwrap_or(50);
-        self.repository.list_recent_notes(limit).await
+        self.repository
+            .list_recent_notes(limit, request.note_uuid.as_deref())
+            .await
     }
 
     /// Reads a note by reference.

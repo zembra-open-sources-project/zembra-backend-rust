@@ -19,6 +19,9 @@ pub struct RecentNotesRequest {
     /// Maximum number of notes to return.
     #[validate(range(min = 1, max = 100))]
     pub limit: Option<i64>,
+    /// Optional full note ID used as a pagination cursor.
+    #[validate(length(equal = 32), custom(function = "validate_hex_note_uuid"))]
+    pub note_uuid: Option<String>,
 }
 
 /// Request body for creating a single note.
@@ -112,4 +115,24 @@ pub struct UpdateNoteRequest {
 /// Returns `Human`, matching schema v0.2.0 defaults.
 pub fn default_note_role() -> String {
     "Human".to_string()
+}
+
+/// Validates a note UUID string as lowercase or uppercase hexadecimal.
+///
+/// # Arguments
+///
+/// * `note_uuid` - Note ID candidate from a request body.
+///
+/// # Returns
+///
+/// Returns `Ok(())` when the value contains only hexadecimal characters.
+fn validate_hex_note_uuid(note_uuid: &str) -> Result<(), validator::ValidationError> {
+    if note_uuid
+        .chars()
+        .all(|character| character.is_ascii_hexdigit())
+    {
+        Ok(())
+    } else {
+        Err(validator::ValidationError::new("hex_note_uuid"))
+    }
 }
