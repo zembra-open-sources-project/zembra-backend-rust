@@ -40,7 +40,9 @@ impl Settings {
 
         if let Some(user_config_path) = user_config_path() {
             if user_config_path.exists() {
-                builder = builder.add_source(config::File::from(user_config_path));
+                builder = builder.add_source(
+                    config::File::from(user_config_path).format(config::FileFormat::Toml),
+                );
             } else {
                 warn!(
                     path = %user_config_path.display(),
@@ -90,7 +92,33 @@ fn sqlite_url_from_path(path: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{DatabaseSettings, sqlite_url_from_path};
+    use super::{DatabaseSettings, Settings, sqlite_url_from_path};
+
+    #[test]
+    fn user_config_env_name_is_parsed_as_toml() {
+        let settings: Settings = config::Config::builder()
+            .add_source(
+                config::File::from_str(
+                    r#"
+                    [server]
+                    host = [127, 0, 0, 1]
+                    port = 3010
+
+                    [database]
+                    path = "data/custom-zembra.db"
+                    "#,
+                    config::FileFormat::Toml,
+                )
+                .format(config::FileFormat::Toml),
+            )
+            .build()
+            .expect("test TOML config should build")
+            .try_deserialize()
+            .expect("test TOML config should deserialize");
+
+        assert_eq!(settings.server.port, 3010);
+        assert_eq!(settings.database.path, "data/custom-zembra.db");
+    }
 
     #[test]
     fn sqlite_url_preserves_relative_database_paths() {

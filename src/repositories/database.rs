@@ -51,11 +51,19 @@ impl Database {
     /// Returns `Ok(())` when required tables and columns are available.
     pub async fn migrate(&self) -> Result<(), sqlx::Error> {
         if !table_exists(&self.pool, "schema_migrations").await? {
-            self.pool.execute(INITIAL_SCHEMA_MIGRATION).await?;
+            if table_exists(&self.pool, "notes").await? {
+                bootstrap_schema_migrations(&self.pool).await?;
+            } else {
+                self.pool.execute(INITIAL_SCHEMA_MIGRATION).await?;
+            }
         }
 
         if !schema_version_exists(&self.pool, "0.2.0").await? {
-            self.pool.execute(NOTE_ROLE_MIGRATION).await?;
+            if column_exists(&self.pool, "notes", "role").await? {
+                record_schema_version(&self.pool, "0.2.0").await?;
+            } else {
+                self.pool.execute(NOTE_ROLE_MIGRATION).await?;
+            }
         }
 
         Ok(())
@@ -72,6 +80,61 @@ impl Database {
             .await
             .is_ok()
     }
+}
+
+/// Creates migration metadata for databases that already contain shared tables.
+///
+/// # Arguments
+///
+/// * `executor` - SQLx executor used to create and seed `schema_migrations`.
+///
+/// # Returns
+///
+/// Returns `Ok(())` when the migration metadata reflects the existing schema.
+async fn bootstrap_schema_migrations<'e, E>(executor: E) -> Result<(), sqlx::Error>
+where
+    E: Executor<'e, Database = sqlx::Sqlite> + Copy,
+{
+    executor
+        .execute(
+            "CREATE TABLE IF NOT EXISTS schema_migrations (
+                version TEXT PRIMARY KEY NOT NULL,
+                applied_at INTEGER NOT NULL CHECK (applied_at >= 0)
+            )",
+        )
+        .await?;
+    record_schema_version(executor, "0.1.0").await?;
+
+    if column_exists(executor, "notes", "role").await? {
+        record_schema_version(executor, "0.2.0").await?;
+    }
+
+    Ok(())
+}
+
+/// Records a shared schema migration version when it is not already present.
+///
+/// # Arguments
+///
+/// * `executor` - SQLx executor used to write `schema_migrations`.
+/// * `version` - Schema version string to insert.
+///
+/// # Returns
+///
+/// Returns `Ok(())` when the version is present after the call.
+async fn record_schema_version<'e, E>(executor: E, version: &str) -> Result<(), sqlx::Error>
+where
+    E: Executor<'e, Database = sqlx::Sqlite>,
+{
+    sqlx::query(
+        "INSERT OR IGNORE INTO schema_migrations (version, applied_at)
+        VALUES (?, unixepoch())",
+    )
+    .bind(version)
+    .execute(executor)
+    .await?;
+
+    Ok(())
 }
 
 /// Checks whether a shared schema migration version has already been applied.
@@ -122,6 +185,37 @@ where
     Ok(exists == 1)
 }
 
+/// Checks whether a column exists in a SQLite table.
+///
+/// # Arguments
+///
+/// * `executor` - SQLx executor used to inspect SQLite schema metadata.
+/// * `table_name` - Table name to inspect.
+/// * `column_name` - Column name to look up.
+///
+/// # Returns
+///
+/// Returns `true` when the table contains the requested column.
+async fn column_exists<'e, E>(
+    executor: E,
+    table_name: &str,
+    column_name: &str,
+) -> Result<bool, sqlx::Error>
+where
+    E: Executor<'e, Database = sqlx::Sqlite>,
+{
+    let query = format!(
+        "SELECT EXISTS(SELECT 1 FROM pragma_table_info('{}') WHERE name = ?)",
+        table_name.replace('\'', "''")
+    );
+    let exists = sqlx::query_scalar::<_, i64>(&query)
+        .bind(column_name)
+        .fetch_one(executor)
+        .await?;
+
+    Ok(exists == 1)
+}
+
 /// Creates the parent directory for filesystem SQLite URLs when needed.
 ///
 /// # Arguments
@@ -149,4 +243,42 @@ fn ensure_parent_directory(database_url: &str) -> Result<(), std::io::Error> {
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{Database, schema_version_exists};
+
+    /// Creates a legacy in-memory database missing migration metadata.
+    ///
+    /// # Returns
+    ///
+    /// Returns a database handle with v0.2.0 tables and no `schema_migrations`.
+    async fn legacy_database_without_migration_metadata() -> Database {
+        let database = Database::connect("sqlite://:memory:").await.unwrap();
+        sqlx::query("DROP TABLE schema_migrations")
+            .execute(&database.pool)
+            .await
+            .unwrap();
+
+        database
+    }
+
+    #[tokio::test]
+    async fn migrate_records_existing_legacy_schema_versions() {
+        let database = legacy_database_without_migration_metadata().await;
+
+        database.migrate().await.unwrap();
+
+        assert!(
+            schema_version_exists(&database.pool, "0.1.0")
+                .await
+                .unwrap()
+        );
+        assert!(
+            schema_version_exists(&database.pool, "0.2.0")
+                .await
+                .unwrap()
+        );
+    }
 }
