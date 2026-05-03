@@ -83,3 +83,11 @@
 - 除非用户提示，否则禁止使用 git commit --amend。
 - git 操作必须串行执行，避免并发 git add、commit、merge、rebase、checkout、switch。
 - 执行 git checkout、git switch 或任何会改变当前分支的操作前，必须先运行 git worktree list，并确认当前 worktree 归属和目标分支占用情况。
+
+## OpenAPI 维护规则
+
+- 新增或修改 HTTP handler 时，必须同步维护对应的 `#[utoipa::path]` 标注，声明 method、path、params、request_body、responses 和 tag。
+- 新增或修改 API DTO、数据库响应模型、错误响应结构时，必须确保相关类型派生或实现 `utoipa::ToSchema`；新增 query 参数结构时必须派生或实现 `utoipa::IntoParams`。
+- 新增 handler 后，必须把 handler path 和相关 schema 注册到 `src/api_doc.rs` 的 `ApiDoc`，确保 `/api-docs/openapi.json` 能动态暴露最新 API 合同。
+- 修改路由 path、method、状态码或响应结构时，必须同步更新 handler 的 OpenAPI 标注和相关测试，禁止只改 Axum route 不改 OpenAPI。
+- 完成 API 相关改动前，必须验证 `GET /api-docs/openapi.json` 可返回 `200 OK`，且 JSON 中包含新增或修改的 path；保留 `/swagger-ui` 作为人类调试入口。

@@ -1,3 +1,4 @@
+mod api_doc;
 mod app;
 mod config;
 mod dto;

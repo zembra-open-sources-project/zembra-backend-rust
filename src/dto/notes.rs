@@ -1,10 +1,17 @@
 use serde::{Deserialize, Serialize};
-use utoipa::ToSchema;
+use utoipa::{IntoParams, ToSchema};
 use validator::Validate;
 
 use crate::models::note::NoteRecord;
 use crate::models::revision::NoteRevisionRecord;
 use crate::models::tag::TagRecord;
+
+/// Query parameters used by the notes list endpoint.
+#[derive(Debug, Clone, Deserialize, IntoParams)]
+pub struct ListNotesQuery {
+    /// Maximum number of notes to return.
+    pub limit: Option<i64>,
+}
 
 /// Request body for creating a single note.
 #[derive(Debug, Clone, Deserialize, Validate, ToSchema)]

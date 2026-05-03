@@ -15,6 +15,16 @@ use crate::repositories::taxonomy::TaxonomyRepository;
 /// # Returns
 ///
 /// Returns fields and their names.
+#[utoipa::path(
+    get,
+    path = "/fields",
+    tag = "taxonomy",
+    params(crate::dto::taxonomy::ListTaxonomyQuery),
+    responses(
+        (status = 200, description = "Fields ordered by name", body = ListFieldsResponse),
+        (status = 500, description = "Database error", body = crate::dto::error::ErrorResponse)
+    )
+)]
 pub async fn list_fields(
     State(state): State<crate::app::AppState>,
     Query(query): Query<ListTaxonomyQuery>,
@@ -36,6 +46,16 @@ pub async fn list_fields(
 /// # Returns
 ///
 /// Returns tags and their names.
+#[utoipa::path(
+    get,
+    path = "/tags",
+    tag = "taxonomy",
+    params(crate::dto::taxonomy::ListTaxonomyQuery),
+    responses(
+        (status = 200, description = "Tags ordered by name", body = ListTagsResponse),
+        (status = 500, description = "Database error", body = crate::dto::error::ErrorResponse)
+    )
+)]
 pub async fn list_tags(
     State(state): State<crate::app::AppState>,
     Query(query): Query<ListTaxonomyQuery>,

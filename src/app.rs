@@ -1,4 +1,6 @@
 use axum::Router;
+use utoipa::OpenApi;
+use utoipa_swagger_ui::SwaggerUi;
 
 /// Shared application state available to all handlers.
 #[derive(Debug, Clone)]
@@ -21,6 +23,10 @@ pub fn build_router(state: AppState) -> Router {
         .merge(crate::routes::health::router())
         .merge(crate::routes::notes::router())
         .merge(crate::routes::taxonomy::router())
+        .merge(
+            SwaggerUi::new("/swagger-ui")
+                .url("/api-docs/openapi.json", crate::api_doc::ApiDoc::openapi()),
+        )
         .with_state(state)
 }
 
@@ -128,5 +134,38 @@ mod tests {
 
         assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
         assert_eq!(body["error"]["code"], "validation_error");
+    }
+
+    #[tokio::test]
+    async fn openapi_json_lists_runtime_api_paths() {
+        let response = send(
+            Request::builder()
+                .uri("/api-docs/openapi.json")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await;
+        let status = response.status();
+        let body = response_json(response).await;
+
+        assert_eq!(status, StatusCode::OK);
+        assert!(body["paths"].get("/health").is_some());
+        assert!(body["paths"].get("/notes").is_some());
+        assert!(body["paths"].get("/notes/batch").is_some());
+        assert!(body["paths"].get("/fields").is_some());
+        assert!(body["paths"].get("/tags").is_some());
+    }
+
+    #[tokio::test]
+    async fn swagger_ui_is_available() {
+        let response = send(
+            Request::builder()
+                .uri("/swagger-ui/")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await;
+
+        assert_eq!(response.status(), StatusCode::OK);
     }
 }

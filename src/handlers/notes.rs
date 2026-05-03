@@ -2,22 +2,15 @@ use axum::extract::rejection::JsonRejection;
 use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use axum::{Json, response::IntoResponse};
-use serde::Deserialize;
 use validator::Validate;
 
 use crate::dto::notes::{
-    BatchCreateNotesRequest, CreateNoteRequest, ListNoteRevisionsResponse, ListNoteTagsResponse,
-    ListNotesResponse, UpdateNoteRequest,
+    BatchCreateNotesRequest, BatchCreateNotesResponse, CreateNoteRequest,
+    ListNoteRevisionsResponse, ListNoteTagsResponse, ListNotesQuery, ListNotesResponse,
+    NoteResponse, UpdateNoteRequest,
 };
 use crate::error::ApiError;
 use crate::services::notes::NotesService;
-
-/// Query parameters for listing notes.
-#[derive(Debug, Deserialize)]
-pub struct ListNotesQuery {
-    /// Maximum number of notes to return.
-    pub limit: Option<i64>,
-}
 
 /// Lists active notes.
 ///
@@ -29,6 +22,16 @@ pub struct ListNotesQuery {
 /// # Returns
 ///
 /// Returns active notes ordered by update time.
+#[utoipa::path(
+    get,
+    path = "/notes",
+    tag = "notes",
+    params(ListNotesQuery),
+    responses(
+        (status = 200, description = "Active notes ordered by update time", body = ListNotesResponse),
+        (status = 500, description = "Database error", body = crate::dto::error::ErrorResponse)
+    )
+)]
 pub async fn list_notes(
     State(state): State<crate::app::AppState>,
     Query(query): Query<ListNotesQuery>,
@@ -49,6 +52,18 @@ pub async fn list_notes(
 /// # Returns
 ///
 /// Returns a `201 Created` response with the created note.
+#[utoipa::path(
+    post,
+    path = "/notes",
+    tag = "notes",
+    request_body = CreateNoteRequest,
+    responses(
+        (status = 201, description = "Note created", body = NoteResponse),
+        (status = 400, description = "Invalid JSON", body = crate::dto::error::ErrorResponse),
+        (status = 422, description = "Validation error", body = crate::dto::error::ErrorResponse),
+        (status = 500, description = "Database error", body = crate::dto::error::ErrorResponse)
+    )
+)]
 pub async fn create_note(
     State(state): State<crate::app::AppState>,
     payload: Result<Json<CreateNoteRequest>, JsonRejection>,
@@ -72,6 +87,18 @@ pub async fn create_note(
 /// # Returns
 ///
 /// Returns a `201 Created` response with created notes.
+#[utoipa::path(
+    post,
+    path = "/notes/batch",
+    tag = "notes",
+    request_body = BatchCreateNotesRequest,
+    responses(
+        (status = 201, description = "Notes created", body = BatchCreateNotesResponse),
+        (status = 400, description = "Invalid JSON", body = crate::dto::error::ErrorResponse),
+        (status = 422, description = "Validation error", body = crate::dto::error::ErrorResponse),
+        (status = 500, description = "Database error", body = crate::dto::error::ErrorResponse)
+    )
+)]
 pub async fn create_notes_batch(
     State(state): State<crate::app::AppState>,
     payload: Result<Json<BatchCreateNotesRequest>, JsonRejection>,
@@ -95,6 +122,21 @@ pub async fn create_notes_batch(
 /// # Returns
 ///
 /// Returns the matching note.
+#[utoipa::path(
+    get,
+    path = "/notes/{note_ref}",
+    tag = "notes",
+    params(
+        ("note_ref" = String, Path, description = "Full 32-character note ID or at least 4-character hex prefix")
+    ),
+    responses(
+        (status = 200, description = "Matching note", body = crate::models::note::NoteRecord),
+        (status = 404, description = "Note not found", body = crate::dto::error::ErrorResponse),
+        (status = 409, description = "Ambiguous note reference", body = crate::dto::error::ErrorResponse),
+        (status = 422, description = "Invalid note reference", body = crate::dto::error::ErrorResponse),
+        (status = 500, description = "Database error", body = crate::dto::error::ErrorResponse)
+    )
+)]
 pub async fn get_note(
     State(state): State<crate::app::AppState>,
     Path(note_ref): Path<String>,
@@ -116,6 +158,23 @@ pub async fn get_note(
 /// # Returns
 ///
 /// Returns the updated note.
+#[utoipa::path(
+    patch,
+    path = "/notes/{note_ref}",
+    tag = "notes",
+    params(
+        ("note_ref" = String, Path, description = "Full 32-character note ID or at least 4-character hex prefix")
+    ),
+    request_body = UpdateNoteRequest,
+    responses(
+        (status = 200, description = "Updated note", body = crate::models::note::NoteRecord),
+        (status = 400, description = "Invalid JSON", body = crate::dto::error::ErrorResponse),
+        (status = 404, description = "Note not found", body = crate::dto::error::ErrorResponse),
+        (status = 409, description = "Ambiguous note reference", body = crate::dto::error::ErrorResponse),
+        (status = 422, description = "Validation or note reference error", body = crate::dto::error::ErrorResponse),
+        (status = 500, description = "Database error", body = crate::dto::error::ErrorResponse)
+    )
+)]
 pub async fn update_note(
     State(state): State<crate::app::AppState>,
     Path(note_ref): Path<String>,
@@ -140,6 +199,21 @@ pub async fn update_note(
 /// # Returns
 ///
 /// Returns the archived note.
+#[utoipa::path(
+    post,
+    path = "/notes/{note_ref}/archive",
+    tag = "notes",
+    params(
+        ("note_ref" = String, Path, description = "Full 32-character note ID or at least 4-character hex prefix")
+    ),
+    responses(
+        (status = 200, description = "Archived note", body = crate::models::note::NoteRecord),
+        (status = 404, description = "Note not found", body = crate::dto::error::ErrorResponse),
+        (status = 409, description = "Ambiguous note reference", body = crate::dto::error::ErrorResponse),
+        (status = 422, description = "Invalid note reference", body = crate::dto::error::ErrorResponse),
+        (status = 500, description = "Database error", body = crate::dto::error::ErrorResponse)
+    )
+)]
 pub async fn archive_note(
     State(state): State<crate::app::AppState>,
     Path(note_ref): Path<String>,
@@ -160,6 +234,21 @@ pub async fn archive_note(
 /// # Returns
 ///
 /// Returns `204 No Content` after deletion.
+#[utoipa::path(
+    delete,
+    path = "/notes/{note_ref}",
+    tag = "notes",
+    params(
+        ("note_ref" = String, Path, description = "Full 32-character note ID or at least 4-character hex prefix")
+    ),
+    responses(
+        (status = 204, description = "Note soft deleted"),
+        (status = 404, description = "Note not found", body = crate::dto::error::ErrorResponse),
+        (status = 409, description = "Ambiguous note reference", body = crate::dto::error::ErrorResponse),
+        (status = 422, description = "Invalid note reference", body = crate::dto::error::ErrorResponse),
+        (status = 500, description = "Database error", body = crate::dto::error::ErrorResponse)
+    )
+)]
 pub async fn delete_note(
     State(state): State<crate::app::AppState>,
     Path(note_ref): Path<String>,
@@ -180,6 +269,21 @@ pub async fn delete_note(
 /// # Returns
 ///
 /// Returns note revisions.
+#[utoipa::path(
+    get,
+    path = "/notes/{note_ref}/revisions",
+    tag = "notes",
+    params(
+        ("note_ref" = String, Path, description = "Full 32-character note ID or at least 4-character hex prefix")
+    ),
+    responses(
+        (status = 200, description = "Note revisions", body = ListNoteRevisionsResponse),
+        (status = 404, description = "Note not found", body = crate::dto::error::ErrorResponse),
+        (status = 409, description = "Ambiguous note reference", body = crate::dto::error::ErrorResponse),
+        (status = 422, description = "Invalid note reference", body = crate::dto::error::ErrorResponse),
+        (status = 500, description = "Database error", body = crate::dto::error::ErrorResponse)
+    )
+)]
 pub async fn list_note_revisions(
     State(state): State<crate::app::AppState>,
     Path(note_ref): Path<String>,
@@ -200,6 +304,21 @@ pub async fn list_note_revisions(
 /// # Returns
 ///
 /// Returns note tags.
+#[utoipa::path(
+    get,
+    path = "/notes/{note_ref}/tags",
+    tag = "notes",
+    params(
+        ("note_ref" = String, Path, description = "Full 32-character note ID or at least 4-character hex prefix")
+    ),
+    responses(
+        (status = 200, description = "Note tags", body = ListNoteTagsResponse),
+        (status = 404, description = "Note not found", body = crate::dto::error::ErrorResponse),
+        (status = 409, description = "Ambiguous note reference", body = crate::dto::error::ErrorResponse),
+        (status = 422, description = "Invalid note reference", body = crate::dto::error::ErrorResponse),
+        (status = 500, description = "Database error", body = crate::dto::error::ErrorResponse)
+    )
+)]
 pub async fn list_note_tags(
     State(state): State<crate::app::AppState>,
     Path(note_ref): Path<String>,
@@ -220,6 +339,22 @@ pub async fn list_note_tags(
 /// # Returns
 ///
 /// Returns the associated tag.
+#[utoipa::path(
+    put,
+    path = "/notes/{note_ref}/tags/{tag_name}",
+    tag = "notes",
+    params(
+        ("note_ref" = String, Path, description = "Full 32-character note ID or at least 4-character hex prefix"),
+        ("tag_name" = String, Path, description = "Tag name to associate")
+    ),
+    responses(
+        (status = 200, description = "Associated tag", body = crate::models::tag::TagRecord),
+        (status = 404, description = "Note not found", body = crate::dto::error::ErrorResponse),
+        (status = 409, description = "Ambiguous note reference", body = crate::dto::error::ErrorResponse),
+        (status = 422, description = "Validation or note reference error", body = crate::dto::error::ErrorResponse),
+        (status = 500, description = "Database error", body = crate::dto::error::ErrorResponse)
+    )
+)]
 pub async fn add_tag_to_note(
     State(state): State<crate::app::AppState>,
     Path((note_ref, tag_name)): Path<(String, String)>,
@@ -240,6 +375,22 @@ pub async fn add_tag_to_note(
 /// # Returns
 ///
 /// Returns `204 No Content` after removal.
+#[utoipa::path(
+    delete,
+    path = "/notes/{note_ref}/tags/{tag_name}",
+    tag = "notes",
+    params(
+        ("note_ref" = String, Path, description = "Full 32-character note ID or at least 4-character hex prefix"),
+        ("tag_name" = String, Path, description = "Tag name to remove")
+    ),
+    responses(
+        (status = 204, description = "Tag association removed"),
+        (status = 404, description = "Note not found", body = crate::dto::error::ErrorResponse),
+        (status = 409, description = "Ambiguous note reference", body = crate::dto::error::ErrorResponse),
+        (status = 422, description = "Validation or note reference error", body = crate::dto::error::ErrorResponse),
+        (status = 500, description = "Database error", body = crate::dto::error::ErrorResponse)
+    )
+)]
 pub async fn remove_tag_from_note(
     State(state): State<crate::app::AppState>,
     Path((note_ref, tag_name)): Path<(String, String)>,

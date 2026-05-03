@@ -1,8 +1,9 @@
 use axum::{Json, extract::State};
 use serde::Serialize;
+use utoipa::ToSchema;
 
 /// Response body returned by the health endpoint.
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, ToSchema)]
 pub struct HealthResponse {
     /// Machine-readable service status.
     pub status: &'static str,
@@ -21,6 +22,14 @@ pub struct HealthResponse {
 /// # Returns
 ///
 /// Returns a JSON response indicating that the service process is healthy.
+#[utoipa::path(
+    get,
+    path = "/health",
+    tag = "health",
+    responses(
+        (status = 200, description = "Service health status", body = HealthResponse)
+    )
+)]
 pub async fn health(State(state): State<crate::app::AppState>) -> Json<HealthResponse> {
     Json(HealthResponse {
         status: "ok",
