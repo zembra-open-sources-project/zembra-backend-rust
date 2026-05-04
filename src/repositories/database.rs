@@ -4,10 +4,14 @@ use std::str::FromStr;
 use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions};
 use sqlx::{Executor, SqlitePool};
 
+use crate::repositories::taxonomy::DEFAULT_WORKSPACE_ID;
+
 const INITIAL_SCHEMA_MIGRATION: &str =
     include_str!("../../vendor/zembra-schema/migrations/001_initial_schema.sql");
 const NOTE_ROLE_MIGRATION: &str =
     include_str!("../../vendor/zembra-schema/migrations/002_add_note_role.sql");
+const BIDIRECTIONAL_SYNC_MIGRATION: &str =
+    include_str!("../../vendor/zembra-schema/migrations/003_add_bidirectional_sync.sql");
 
 /// SQLite database handle shared by application services.
 #[derive(Debug, Clone)]
@@ -44,7 +48,7 @@ impl Database {
         Ok(database)
     }
 
-    /// Applies v0.2.0 shared schema migrations to the database.
+    /// Applies v0.3.0 shared schema migrations to the database.
     ///
     /// # Returns
     ///
@@ -63,6 +67,17 @@ impl Database {
                 record_schema_version(&self.pool, "0.2.0").await?;
             } else {
                 self.pool.execute(NOTE_ROLE_MIGRATION).await?;
+            }
+        }
+
+        if !schema_version_exists(&self.pool, "0.3.0").await? {
+            if table_exists(&self.pool, "workspaces").await?
+                && table_exists(&self.pool, "sync_changes").await?
+                && column_exists(&self.pool, "notes", "workspace_id").await?
+            {
+                record_schema_version(&self.pool, "0.3.0").await?;
+            } else {
+                self.pool.execute(BIDIRECTIONAL_SYNC_MIGRATION).await?;
             }
         }
 
@@ -108,6 +123,38 @@ where
     if column_exists(executor, "notes", "role").await? {
         record_schema_version(executor, "0.2.0").await?;
     }
+
+    if table_exists(executor, "workspaces").await?
+        && table_exists(executor, "sync_changes").await?
+        && column_exists(executor, "notes", "workspace_id").await?
+    {
+        ensure_default_workspace(executor).await?;
+        record_schema_version(executor, "0.3.0").await?;
+    }
+
+    Ok(())
+}
+
+/// Ensures the shared default workspace exists for workspace-scoped queries.
+///
+/// # Arguments
+///
+/// * `executor` - SQLx executor used to upsert the default workspace.
+///
+/// # Returns
+///
+/// Returns `Ok(())` when the default workspace is present.
+async fn ensure_default_workspace<'e, E>(executor: E) -> Result<(), sqlx::Error>
+where
+    E: Executor<'e, Database = sqlx::Sqlite>,
+{
+    sqlx::query(
+        "INSERT OR IGNORE INTO workspaces (id, workspace_name, created_at, updated_at)
+        VALUES (?, NULL, unixepoch(), unixepoch())",
+    )
+    .bind(DEFAULT_WORKSPACE_ID)
+    .execute(executor)
+    .await?;
 
     Ok(())
 }
@@ -253,7 +300,7 @@ mod tests {
     ///
     /// # Returns
     ///
-    /// Returns a database handle with v0.2.0 tables and no `schema_migrations`.
+    /// Returns a database handle with v0.3.0 tables and no `schema_migrations`.
     async fn legacy_database_without_migration_metadata() -> Database {
         let database = Database::connect("sqlite://:memory:").await.unwrap();
         sqlx::query("DROP TABLE schema_migrations")
@@ -277,6 +324,11 @@ mod tests {
         );
         assert!(
             schema_version_exists(&database.pool, "0.2.0")
+                .await
+                .unwrap()
+        );
+        assert!(
+            schema_version_exists(&database.pool, "0.3.0")
                 .await
                 .unwrap()
         );

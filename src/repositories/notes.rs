@@ -5,7 +5,8 @@ use crate::models::note::NoteRecord;
 use crate::models::revision::NoteRevisionRecord;
 use crate::models::tag::TagRecord;
 use crate::repositories::taxonomy::{
-    get_or_create_field_in_transaction, get_or_create_tag_in_transaction, new_id,
+    DEFAULT_WORKSPACE_ID, get_or_create_field_in_transaction, get_or_create_tag_in_transaction,
+    new_id,
 };
 
 /// Input data used to create a note.
@@ -110,8 +111,9 @@ impl NotesRepository {
 
         sqlx::query_as::<_, NoteRecord>(
             "SELECT id, content, role, field_id, created_at, updated_at, archived_at, deleted_at, current_revision_id \
-             FROM notes WHERE deleted_at IS NULL ORDER BY updated_at DESC LIMIT ?",
+             FROM notes WHERE workspace_id = ? AND deleted_at IS NULL ORDER BY updated_at DESC LIMIT ?",
         )
+        .bind(DEFAULT_WORKSPACE_ID)
         .bind(limit)
         .fetch_all(&self.pool)
         .await
@@ -141,11 +143,13 @@ impl NotesRepository {
                 sqlx::query_as::<_, NoteRecord>(
                     "SELECT id, content, role, field_id, created_at, updated_at, archived_at, deleted_at, current_revision_id \
                      FROM notes \
-                     WHERE deleted_at IS NULL \
+                     WHERE workspace_id = ? \
+                     AND deleted_at IS NULL \
                      AND archived_at IS NULL \
                      AND (updated_at < ? OR (updated_at = ? AND id < ?)) \
                      ORDER BY updated_at DESC, id DESC LIMIT ?",
                 )
+                .bind(DEFAULT_WORKSPACE_ID)
                 .bind(cursor.updated_at)
                 .bind(cursor.updated_at)
                 .bind(&cursor.id)
@@ -156,8 +160,9 @@ impl NotesRepository {
             }
             None => sqlx::query_as::<_, NoteRecord>(
                 "SELECT id, content, role, field_id, created_at, updated_at, archived_at, deleted_at, current_revision_id \
-                 FROM notes WHERE deleted_at IS NULL AND archived_at IS NULL ORDER BY updated_at DESC, id DESC LIMIT ?",
+                 FROM notes WHERE workspace_id = ? AND deleted_at IS NULL AND archived_at IS NULL ORDER BY updated_at DESC, id DESC LIMIT ?",
             )
+            .bind(DEFAULT_WORKSPACE_ID)
             .bind(limit)
             .fetch_all(&self.pool)
             .await
@@ -177,8 +182,9 @@ impl NotesRepository {
     async fn get_visible_note_by_id(&self, note_id: &str) -> Result<NoteRecord, ApiError> {
         sqlx::query_as::<_, NoteRecord>(
             "SELECT id, content, role, field_id, created_at, updated_at, archived_at, deleted_at, current_revision_id \
-             FROM notes WHERE id = ? AND deleted_at IS NULL AND archived_at IS NULL",
+             FROM notes WHERE workspace_id = ? AND id = ? AND deleted_at IS NULL AND archived_at IS NULL",
         )
+        .bind(DEFAULT_WORKSPACE_ID)
         .bind(note_id)
         .fetch_optional(&self.pool)
         .await?
@@ -204,8 +210,9 @@ impl NotesRepository {
         let pattern = format!("{note_ref}%");
         let notes = sqlx::query_as::<_, NoteRecord>(
             "SELECT id, content, role, field_id, created_at, updated_at, archived_at, deleted_at, current_revision_id \
-             FROM notes WHERE id LIKE ? AND deleted_at IS NULL ORDER BY id ASC LIMIT 2",
+             FROM notes WHERE workspace_id = ? AND id LIKE ? AND deleted_at IS NULL ORDER BY id ASC LIMIT 2",
         )
+        .bind(DEFAULT_WORKSPACE_ID)
         .bind(pattern)
         .fetch_all(&self.pool)
         .await?;
@@ -243,10 +250,11 @@ impl NotesRepository {
         let revision_id = new_id();
 
         sqlx::query(
-            "INSERT INTO note_revisions (id, note_id, content, title, device_id, created_at) \
-             VALUES (?, ?, ?, NULL, ?, unixepoch())",
+            "INSERT INTO note_revisions (id, workspace_id, note_id, content, title, device_id, created_at) \
+             VALUES (?, ?, ?, ?, NULL, ?, unixepoch())",
         )
         .bind(&revision_id)
+        .bind(DEFAULT_WORKSPACE_ID)
         .bind(&note.id)
         .bind(content)
         .bind(device_id)
@@ -254,10 +262,11 @@ impl NotesRepository {
         .await?;
 
         sqlx::query(
-            "UPDATE notes SET content = ?, updated_at = unixepoch(), current_revision_id = ? WHERE id = ?",
+            "UPDATE notes SET content = ?, updated_at = unixepoch(), current_revision_id = ? WHERE workspace_id = ? AND id = ?",
         )
         .bind(content)
         .bind(&revision_id)
+        .bind(DEFAULT_WORKSPACE_ID)
         .bind(&note.id)
         .execute(&mut *transaction)
         .await?;
@@ -280,8 +289,9 @@ impl NotesRepository {
     pub async fn archive_note(&self, note_ref: &str) -> Result<NoteRecord, ApiError> {
         let note = self.get_note_by_ref(note_ref).await?;
         sqlx::query(
-            "UPDATE notes SET archived_at = unixepoch(), updated_at = unixepoch() WHERE id = ?",
+            "UPDATE notes SET archived_at = unixepoch(), updated_at = unixepoch() WHERE workspace_id = ? AND id = ?",
         )
+        .bind(DEFAULT_WORKSPACE_ID)
         .bind(&note.id)
         .execute(&self.pool)
         .await?;
@@ -301,8 +311,9 @@ impl NotesRepository {
     pub async fn delete_note(&self, note_ref: &str) -> Result<(), ApiError> {
         let note = self.get_note_by_ref(note_ref).await?;
         sqlx::query(
-            "UPDATE notes SET deleted_at = unixepoch(), updated_at = unixepoch() WHERE id = ?",
+            "UPDATE notes SET deleted_at = unixepoch(), updated_at = unixepoch() WHERE workspace_id = ? AND id = ?",
         )
+        .bind(DEFAULT_WORKSPACE_ID)
         .bind(&note.id)
         .execute(&self.pool)
         .await?;
@@ -327,8 +338,9 @@ impl NotesRepository {
 
         sqlx::query_as::<_, NoteRevisionRecord>(
             "SELECT id, note_id, content, title, device_id, created_at \
-             FROM note_revisions WHERE note_id = ? ORDER BY created_at ASC, rowid ASC",
+             FROM note_revisions WHERE workspace_id = ? AND note_id = ? ORDER BY created_at ASC, rowid ASC",
         )
+        .bind(DEFAULT_WORKSPACE_ID)
         .bind(note.id)
         .fetch_all(&self.pool)
         .await
@@ -349,9 +361,10 @@ impl NotesRepository {
 
         sqlx::query_as::<_, TagRecord>(
             "SELECT tags.id, tags.name, tags.created_at \
-             FROM tags INNER JOIN note_tags ON tags.id = note_tags.tag_id \
-             WHERE note_tags.note_id = ? ORDER BY tags.name ASC",
+             FROM tags INNER JOIN note_tags ON tags.workspace_id = note_tags.workspace_id AND tags.id = note_tags.tag_id \
+             WHERE note_tags.workspace_id = ? AND note_tags.note_id = ? ORDER BY tags.name ASC",
         )
+        .bind(DEFAULT_WORKSPACE_ID)
         .bind(note.id)
         .fetch_all(&self.pool)
         .await
@@ -378,8 +391,9 @@ impl NotesRepository {
         let tag = get_or_create_tag_in_transaction(&mut transaction, tag_name).await?;
 
         sqlx::query(
-            "INSERT OR IGNORE INTO note_tags (note_id, tag_id, created_at) VALUES (?, ?, unixepoch())",
+            "INSERT OR IGNORE INTO note_tags (workspace_id, note_id, tag_id, created_at) VALUES (?, ?, ?, unixepoch())",
         )
+        .bind(DEFAULT_WORKSPACE_ID)
         .bind(&note.id)
         .bind(&tag.id)
         .execute(&mut *transaction)
@@ -408,9 +422,11 @@ impl NotesRepository {
 
         sqlx::query(
             "DELETE FROM note_tags \
-             WHERE note_id = ? AND tag_id IN (SELECT id FROM tags WHERE name = ?)",
+             WHERE workspace_id = ? AND note_id = ? AND tag_id IN (SELECT id FROM tags WHERE workspace_id = ? AND name = ?)",
         )
+        .bind(DEFAULT_WORKSPACE_ID)
         .bind(note.id)
+        .bind(DEFAULT_WORKSPACE_ID)
         .bind(tag_name)
         .execute(&self.pool)
         .await?;
@@ -442,10 +458,11 @@ async fn create_note_in_transaction(
 
     sqlx::query(
         "INSERT INTO notes \
-         (id, content, role, field_id, created_at, updated_at, archived_at, deleted_at, current_revision_id) \
-         VALUES (?, ?, ?, ?, unixepoch(), unixepoch(), NULL, NULL, ?)",
+         (id, workspace_id, content, role, field_id, created_at, updated_at, archived_at, deleted_at, current_revision_id) \
+         VALUES (?, ?, ?, ?, ?, unixepoch(), unixepoch(), NULL, NULL, ?)",
     )
     .bind(&note_id)
+    .bind(DEFAULT_WORKSPACE_ID)
     .bind(&input.content)
     .bind(&input.role)
     .bind(field.as_ref().map(|field| field.id.as_str()))
@@ -454,10 +471,11 @@ async fn create_note_in_transaction(
     .await?;
 
     sqlx::query(
-        "INSERT INTO note_revisions (id, note_id, content, title, device_id, created_at) \
-         VALUES (?, ?, ?, NULL, ?, unixepoch())",
+        "INSERT INTO note_revisions (id, workspace_id, note_id, content, title, device_id, created_at) \
+         VALUES (?, ?, ?, ?, NULL, ?, unixepoch())",
     )
     .bind(&revision_id)
+    .bind(DEFAULT_WORKSPACE_ID)
     .bind(&note_id)
     .bind(&input.content)
     .bind(input.device_id.as_deref())
@@ -468,8 +486,9 @@ async fn create_note_in_transaction(
     for tag_name in input.tags {
         let tag = get_or_create_tag_in_transaction(transaction, &tag_name).await?;
         sqlx::query(
-            "INSERT OR IGNORE INTO note_tags (note_id, tag_id, created_at) VALUES (?, ?, unixepoch())",
+            "INSERT OR IGNORE INTO note_tags (workspace_id, note_id, tag_id, created_at) VALUES (?, ?, ?, unixepoch())",
         )
+        .bind(DEFAULT_WORKSPACE_ID)
         .bind(&note_id)
         .bind(&tag.id)
         .execute(&mut **transaction)
@@ -502,8 +521,9 @@ async fn select_note_by_id(
 ) -> Result<NoteRecord, sqlx::Error> {
     sqlx::query_as::<_, NoteRecord>(
         "SELECT id, content, role, field_id, created_at, updated_at, archived_at, deleted_at, current_revision_id \
-         FROM notes WHERE id = ?",
+         FROM notes WHERE workspace_id = ? AND id = ?",
     )
+    .bind(DEFAULT_WORKSPACE_ID)
     .bind(note_id)
     .fetch_one(&mut **transaction)
     .await

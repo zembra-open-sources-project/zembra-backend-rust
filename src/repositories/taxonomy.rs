@@ -4,6 +4,9 @@ use uuid::Uuid;
 use crate::models::field::FieldRecord;
 use crate::models::tag::TagRecord;
 
+/// Default workspace inserted by shared schema v0.3.0 for legacy local data.
+pub const DEFAULT_WORKSPACE_ID: &str = "00000000-0000-4000-8000-000000000300";
+
 /// Repository for field and tag data access.
 #[derive(Debug, Clone)]
 pub struct TaxonomyRepository {
@@ -102,26 +105,34 @@ pub async fn get_or_create_field_in_transaction(
     transaction: &mut Transaction<'_, Sqlite>,
     name: &str,
 ) -> Result<FieldRecord, sqlx::Error> {
-    if let Some(field) =
-        sqlx::query_as::<_, FieldRecord>("SELECT id, name, created_at FROM fields WHERE name = ?")
-            .bind(name)
-            .fetch_optional(&mut **transaction)
-            .await?
+    if let Some(field) = sqlx::query_as::<_, FieldRecord>(
+        "SELECT id, name, created_at FROM fields WHERE workspace_id = ? AND name = ?",
+    )
+    .bind(DEFAULT_WORKSPACE_ID)
+    .bind(name)
+    .fetch_optional(&mut **transaction)
+    .await?
     {
         return Ok(field);
     }
 
     let id = new_id();
-    sqlx::query("INSERT INTO fields (id, name, created_at) VALUES (?, ?, unixepoch())")
-        .bind(&id)
-        .bind(name)
-        .execute(&mut **transaction)
-        .await?;
+    sqlx::query(
+        "INSERT INTO fields (id, workspace_id, name, created_at) VALUES (?, ?, ?, unixepoch())",
+    )
+    .bind(&id)
+    .bind(DEFAULT_WORKSPACE_ID)
+    .bind(name)
+    .execute(&mut **transaction)
+    .await?;
 
-    sqlx::query_as::<_, FieldRecord>("SELECT id, name, created_at FROM fields WHERE id = ?")
-        .bind(id)
-        .fetch_one(&mut **transaction)
-        .await
+    sqlx::query_as::<_, FieldRecord>(
+        "SELECT id, name, created_at FROM fields WHERE workspace_id = ? AND id = ?",
+    )
+    .bind(DEFAULT_WORKSPACE_ID)
+    .bind(id)
+    .fetch_one(&mut **transaction)
+    .await
 }
 
 /// Returns an existing tag by name or creates it in the provided transaction.
@@ -138,26 +149,34 @@ pub async fn get_or_create_tag_in_transaction(
     transaction: &mut Transaction<'_, Sqlite>,
     name: &str,
 ) -> Result<TagRecord, sqlx::Error> {
-    if let Some(tag) =
-        sqlx::query_as::<_, TagRecord>("SELECT id, name, created_at FROM tags WHERE name = ?")
-            .bind(name)
-            .fetch_optional(&mut **transaction)
-            .await?
+    if let Some(tag) = sqlx::query_as::<_, TagRecord>(
+        "SELECT id, name, created_at FROM tags WHERE workspace_id = ? AND name = ?",
+    )
+    .bind(DEFAULT_WORKSPACE_ID)
+    .bind(name)
+    .fetch_optional(&mut **transaction)
+    .await?
     {
         return Ok(tag);
     }
 
     let id = new_id();
-    sqlx::query("INSERT INTO tags (id, name, created_at) VALUES (?, ?, unixepoch())")
-        .bind(&id)
-        .bind(name)
-        .execute(&mut **transaction)
-        .await?;
+    sqlx::query(
+        "INSERT INTO tags (id, workspace_id, name, created_at) VALUES (?, ?, ?, unixepoch())",
+    )
+    .bind(&id)
+    .bind(DEFAULT_WORKSPACE_ID)
+    .bind(name)
+    .execute(&mut **transaction)
+    .await?;
 
-    sqlx::query_as::<_, TagRecord>("SELECT id, name, created_at FROM tags WHERE id = ?")
-        .bind(id)
-        .fetch_one(&mut **transaction)
-        .await
+    sqlx::query_as::<_, TagRecord>(
+        "SELECT id, name, created_at FROM tags WHERE workspace_id = ? AND id = ?",
+    )
+    .bind(DEFAULT_WORKSPACE_ID)
+    .bind(id)
+    .fetch_one(&mut **transaction)
+    .await
 }
 
 /// Lists field records using a pool.
@@ -177,8 +196,9 @@ async fn list_fields_with_pool(
     let limit = limit.unwrap_or(i64::MAX);
 
     sqlx::query_as::<_, FieldRecord>(
-        "SELECT id, name, created_at FROM fields ORDER BY name ASC LIMIT ?",
+        "SELECT id, name, created_at FROM fields WHERE workspace_id = ? ORDER BY name ASC LIMIT ?",
     )
+    .bind(DEFAULT_WORKSPACE_ID)
     .bind(limit)
     .fetch_all(pool)
     .await
@@ -201,8 +221,9 @@ async fn list_tags_with_pool(
     let limit = limit.unwrap_or(i64::MAX);
 
     sqlx::query_as::<_, TagRecord>(
-        "SELECT id, name, created_at FROM tags ORDER BY name ASC LIMIT ?",
+        "SELECT id, name, created_at FROM tags WHERE workspace_id = ? ORDER BY name ASC LIMIT ?",
     )
+    .bind(DEFAULT_WORKSPACE_ID)
     .bind(limit)
     .fetch_all(pool)
     .await

@@ -112,7 +112,7 @@ pub struct UpdateNoteRequest {
 ///
 /// # Returns
 ///
-/// Returns `Human`, matching schema v0.2.0 defaults.
+/// Returns `Human`, matching shared schema defaults.
 pub fn default_note_role() -> String {
     "Human".to_string()
 }
