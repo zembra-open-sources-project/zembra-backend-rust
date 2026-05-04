@@ -2,7 +2,7 @@
 
 ## Codex 持续开发工作流
 
-### 开发流程约
+### 开发流程
 
 本项目的所有需求开发，除非用户在 Prompt 中指定特殊流程，否则严格遵守如下步骤完成：
 
@@ -91,3 +91,8 @@
 - 新增 handler 后，必须把 handler path 和相关 schema 注册到 `src/api_doc.rs` 的 `ApiDoc`，确保 `/api-docs/openapi.json` 能动态暴露最新 API 合同。
 - 修改路由 path、method、状态码或响应结构时，必须同步更新 handler 的 OpenAPI 标注和相关测试，禁止只改 Axum route 不改 OpenAPI。
 - 完成 API 相关改动前，必须验证 `GET /api-docs/openapi.json` 可返回 `200 OK`，且 JSON 中包含新增或修改的 path；保留 `/swagger-ui` 作为人类调试入口。
+
+## 后端开发的额外约束
+
+1. 完成每个需求后，启动后端服务供我验收。在我验收通过后，恰当关闭服务，避免服务常驻。
+2. 配置文件管理：除非用户额外强调，否则统一使用 `.zembra.env`（也就是当前代码仓的管理方式）
