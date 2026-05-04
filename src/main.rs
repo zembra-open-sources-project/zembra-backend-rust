@@ -9,6 +9,7 @@ mod models;
 mod repositories;
 mod routes;
 mod services;
+mod sync;
 
 use std::net::{Ipv4Addr, SocketAddr};
 

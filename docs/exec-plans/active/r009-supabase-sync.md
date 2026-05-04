@@ -76,7 +76,7 @@
 
 ### Task #6: 实现 Supabase REST client
 
-**Status:** Designed
+**Status:** Finished
 
 **Files:** Create `src/sync/supabase.rs`, Create `src/sync/mod.rs`, Modify `Cargo.toml`
 
@@ -88,7 +88,7 @@
 
 ### Task #7: 实现 sync service
 
-**Status:** Designed
+**Status:** Finished
 
 **Files:** Create `src/services/sync.rs`, Modify `src/services/mod.rs`
 
@@ -100,7 +100,7 @@
 
 ### Task #8: 实现远端 change 应用和冲突处理
 
-**Status:** Designed
+**Status:** Finished
 
 **Files:** Modify `src/repositories/sync.rs`, Modify `src/services/sync.rs`
 
@@ -168,3 +168,4 @@
 - 2026-05-04：完成设计文档和开发计划，等待用户审核。
 - 2026-05-04：Stage #1 完成 sync 配置扩展与 Supabase Postgres migration 初稿，等待验证与提交。
 - 2026-05-04：Stage #2 完成本地 `sync_changes` 生成，覆盖 note、note_revision、field、tag 和 note_tag 写入路径；已通过 `cargo fmt --check` 和 `cargo test notes`。
+- 2026-05-04：Stage #3 完成 Supabase REST client、sync service、push/pull 游标编排和远端 change 幂等应用；已通过 `cargo fmt --check` 和 `cargo test sync`。
