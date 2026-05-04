@@ -9,6 +9,9 @@ pub struct Settings {
     pub server: ServerSettings,
     /// SQLite database settings.
     pub database: DatabaseSettings,
+    /// Logging settings.
+    #[serde(default)]
+    pub logging: LoggingSettings,
 }
 
 /// HTTP server binding settings.
@@ -25,6 +28,31 @@ pub struct ServerSettings {
 pub struct DatabaseSettings {
     /// SQLite database file path.
     pub path: String,
+}
+
+/// Runtime logging settings.
+#[derive(Debug, Clone, Deserialize)]
+pub struct LoggingSettings {
+    /// Minimum log level displayed by console and file subscribers.
+    #[serde(default = "default_log_level")]
+    pub level: String,
+    /// Directory where daily log files are written.
+    #[serde(default = "default_log_path")]
+    pub path: String,
+}
+
+impl Default for LoggingSettings {
+    /// Creates default logging settings.
+    ///
+    /// # Returns
+    ///
+    /// Returns `INFO` as the displayed log level and `logs` as the log directory.
+    fn default() -> Self {
+        Self {
+            level: default_log_level(),
+            path: default_log_path(),
+        }
+    }
 }
 
 impl Settings {
@@ -90,6 +118,24 @@ fn sqlite_url_from_path(path: &str) -> String {
     format!("sqlite://{path}")
 }
 
+/// Provides the default displayed log level.
+///
+/// # Returns
+///
+/// Returns `INFO`.
+fn default_log_level() -> String {
+    "INFO".to_string()
+}
+
+/// Provides the default log directory.
+///
+/// # Returns
+///
+/// Returns `logs`.
+fn default_log_path() -> String {
+    "logs".to_string()
+}
+
 #[cfg(test)]
 mod tests {
     use super::{DatabaseSettings, Settings, sqlite_url_from_path};
@@ -118,6 +164,38 @@ mod tests {
 
         assert_eq!(settings.server.port, 3010);
         assert_eq!(settings.database.path, "data/custom-zembra.db");
+        assert_eq!(settings.logging.level, "INFO");
+        assert_eq!(settings.logging.path, "logs");
+    }
+
+    #[test]
+    fn logging_settings_are_loaded_from_toml() {
+        let settings: Settings = config::Config::builder()
+            .add_source(
+                config::File::from_str(
+                    r#"
+                    [server]
+                    host = [127, 0, 0, 1]
+                    port = 3010
+
+                    [database]
+                    path = "data/custom-zembra.db"
+
+                    [logging]
+                    level = "DEBUG"
+                    path = "tmp/logs"
+                    "#,
+                    config::FileFormat::Toml,
+                )
+                .format(config::FileFormat::Toml),
+            )
+            .build()
+            .expect("test TOML config should build")
+            .try_deserialize()
+            .expect("test TOML config should deserialize");
+
+        assert_eq!(settings.logging.level, "DEBUG");
+        assert_eq!(settings.logging.path, "tmp/logs");
     }
 
     #[test]
