@@ -40,14 +40,14 @@ pub fn init(settings: &crate::config::LoggingSettings) -> LoggingGuard {
     let file_appender = tracing_appender::rolling::daily(&settings.path, "zembra.log");
     let (file_writer, file_guard) = tracing_appender::non_blocking(file_appender);
     let console_layer = fmt::layer()
-        .with_target(true)
+        .with_target(false)
         .with_thread_ids(false)
         .with_thread_names(false)
         .with_filter(level);
     let file_layer = fmt::layer()
         .with_writer(file_writer)
         .with_ansi(false)
-        .with_target(true)
+        .with_target(false)
         .with_thread_ids(false)
         .with_thread_names(false)
         .with_filter(level);
