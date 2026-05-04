@@ -140,7 +140,7 @@
 
 ### Task #11: 回归验证
 
-**Status:** Designed
+**Status:** Finished
 
 **Files:** Verify repository
 
@@ -152,7 +152,7 @@
 
 ### Task #12: 更新执行记录
 
-**Status:** Designed
+**Status:** Finished
 
 **Files:** Modify `docs/exec-plans/active/r009-supabase-sync.md`, Modify `docs/PROGRESS.md`
 
@@ -170,3 +170,4 @@
 - 2026-05-04：Stage #2 完成本地 `sync_changes` 生成，覆盖 note、note_revision、field、tag 和 note_tag 写入路径；已通过 `cargo fmt --check` 和 `cargo test notes`。
 - 2026-05-04：Stage #3 完成 Supabase REST client、sync service、push/pull 游标编排和远端 change 幂等应用；已通过 `cargo fmt --check` 和 `cargo test sync`。
 - 2026-05-04：Stage #4 完成后台同步 worker 与 `/sync/status`、`/sync/run`、`/sync/push`、`/sync/pull` API 接入，OpenAPI 已注册 sync path；已通过 `cargo fmt --check`、`cargo test sync` 和 `cargo check`。
+- 2026-05-04：Stage #5 完成整体验证，已通过 `cargo fmt --check`、`cargo check`、`cargo test`、`cargo clippy -- -D warnings`；本地启动服务后 `/health` 返回 `200`，`/api-docs/openapi.json` 包含 sync API path。
