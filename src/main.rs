@@ -25,7 +25,12 @@ async fn main() -> Result<(), error::AppError> {
     let _logging_guard = logging::init(&settings.logging);
     let database_url = settings.database.sqlite_url();
     let database = repositories::database::Database::connect(&database_url).await?;
-    let app = app::build_router(app::AppState { database });
+    let sync_service = services::sync::SyncService::new(database.pool.clone(), &settings.sync);
+    sync::worker::spawn_background_sync(sync_service.clone(), settings.sync.clone());
+    let app = app::build_router(app::AppState {
+        database,
+        sync: sync_service,
+    });
     let host = Ipv4Addr::from(settings.server.host);
     let addr = SocketAddr::from((host, settings.server.port));
     let listener = tokio::net::TcpListener::bind(addr).await?;

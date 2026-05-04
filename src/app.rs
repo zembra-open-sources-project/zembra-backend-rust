@@ -7,6 +7,8 @@ use utoipa_swagger_ui::SwaggerUi;
 pub struct AppState {
     /// SQLite database handle used by repositories and health checks.
     pub database: crate::repositories::database::Database,
+    /// Supabase synchronization service used by sync routes and worker.
+    pub sync: crate::services::sync::SyncService,
 }
 
 /// Builds the root HTTP router for the backend service.
@@ -23,6 +25,7 @@ pub fn build_router(state: AppState) -> Router {
         .merge(crate::routes::health::router())
         .merge(crate::routes::notes::router())
         .merge(crate::routes::taxonomy::router())
+        .merge(crate::routes::sync::router())
         .merge(
             SwaggerUi::new("/swagger-ui")
                 .url("/api-docs/openapi.json", crate::api_doc::ApiDoc::openapi()),
@@ -47,8 +50,10 @@ mod tests {
         let database = crate::repositories::database::Database::connect("sqlite://:memory:")
             .await
             .unwrap();
+        let settings = crate::config::SyncSettings::default();
+        let sync = crate::services::sync::SyncService::new(database.pool.clone(), &settings);
 
-        super::AppState { database }
+        super::AppState { database, sync }
     }
 
     /// Sends a request to the application router in tests.
@@ -219,6 +224,44 @@ mod tests {
         assert!(body["paths"].get("/notes/batch").is_some());
         assert!(body["paths"].get("/fields").is_some());
         assert!(body["paths"].get("/tags").is_some());
+        assert!(body["paths"].get("/sync/status").is_some());
+        assert!(body["paths"].get("/sync/run").is_some());
+        assert!(body["paths"].get("/sync/push").is_some());
+        assert!(body["paths"].get("/sync/pull").is_some());
+    }
+
+    #[tokio::test]
+    async fn sync_status_route_returns_disabled_status() {
+        let response = send(
+            Request::builder()
+                .uri("/sync/status")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await;
+        let status = response.status();
+        let body = response_json(response).await;
+
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(body["enabled"], false);
+        assert_eq!(body["states"], json!([]));
+    }
+
+    #[tokio::test]
+    async fn manual_sync_route_returns_disabled_error_when_sync_is_off() {
+        let response = send(
+            Request::builder()
+                .method("POST")
+                .uri("/sync/run")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await;
+        let status = response.status();
+        let body = response_json(response).await;
+
+        assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
+        assert_eq!(body["error"]["code"], "sync_disabled");
     }
 
     #[tokio::test]

@@ -114,7 +114,7 @@
 
 ### Task #9: 接入后台常驻 worker
 
-**Status:** Designed
+**Status:** Finished
 
 **Files:** Create `src/sync/worker.rs`, Modify `src/main.rs`, Modify `src/app.rs`
 
@@ -126,7 +126,7 @@
 
 ### Task #10: 新增 sync HTTP API
 
-**Status:** Designed
+**Status:** Finished
 
 **Files:** Create `src/handlers/sync.rs`, Create `src/routes/sync.rs`, Create `src/dto/sync.rs`, Modify `src/handlers/mod.rs`, Modify `src/routes/mod.rs`, Modify `src/dto/mod.rs`, Modify `src/app.rs`, Modify `src/api_doc.rs`
 
@@ -169,3 +169,4 @@
 - 2026-05-04：Stage #1 完成 sync 配置扩展与 Supabase Postgres migration 初稿，等待验证与提交。
 - 2026-05-04：Stage #2 完成本地 `sync_changes` 生成，覆盖 note、note_revision、field、tag 和 note_tag 写入路径；已通过 `cargo fmt --check` 和 `cargo test notes`。
 - 2026-05-04：Stage #3 完成 Supabase REST client、sync service、push/pull 游标编排和远端 change 幂等应用；已通过 `cargo fmt --check` 和 `cargo test sync`。
+- 2026-05-04：Stage #4 完成后台同步 worker 与 `/sync/status`、`/sync/run`、`/sync/push`、`/sync/pull` API 接入，OpenAPI 已注册 sync path；已通过 `cargo fmt --check`、`cargo test sync` 和 `cargo check`。

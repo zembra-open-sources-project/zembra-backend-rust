@@ -47,6 +47,12 @@ pub enum ApiError {
     /// SQLite operation failed.
     #[error("Database operation failed.")]
     Database(#[from] sqlx::Error),
+    /// Synchronization is disabled by runtime configuration.
+    #[error("Synchronization is disabled.")]
+    SyncDisabled,
+    /// Synchronization operation failed.
+    #[error("Synchronization failed: {0}")]
+    SyncFailed(String),
 }
 
 impl ApiError {
@@ -64,7 +70,9 @@ impl ApiError {
             Self::RecordNotFound(_) => StatusCode::NOT_FOUND,
             Self::AmbiguousNoteReference(_) => StatusCode::CONFLICT,
             Self::DatabaseNotInitialized => StatusCode::SERVICE_UNAVAILABLE,
+            Self::SyncDisabled => StatusCode::SERVICE_UNAVAILABLE,
             Self::Database(_) => StatusCode::INTERNAL_SERVER_ERROR,
+            Self::SyncFailed(_) => StatusCode::INTERNAL_SERVER_ERROR,
         }
     }
 
@@ -83,6 +91,8 @@ impl ApiError {
             Self::AmbiguousNoteReference(_) => "ambiguous_note_reference",
             Self::DatabaseNotInitialized => "database_not_initialized",
             Self::Database(_) => "database_error",
+            Self::SyncDisabled => "sync_disabled",
+            Self::SyncFailed(_) => "sync_failed",
         }
     }
 }
