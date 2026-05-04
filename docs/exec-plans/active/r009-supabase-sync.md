@@ -38,7 +38,7 @@
 
 ### Task #3: 新增 sync repository 基础能力
 
-**Status:** Designed
+**Status:** Finished
 
 **Files:** Create `src/repositories/sync.rs`, Modify `src/repositories/mod.rs`
 
@@ -50,7 +50,7 @@
 
 ### Task #4: notes 写入生成 change
 
-**Status:** Designed
+**Status:** Finished
 
 **Files:** Modify `src/repositories/notes.rs`
 
@@ -62,7 +62,7 @@
 
 ### Task #5: taxonomy 写入生成 change
 
-**Status:** Designed
+**Status:** Finished
 
 **Files:** Modify `src/repositories/taxonomy.rs`
 
@@ -167,3 +167,4 @@
 - 2026-05-04：完成需求澄清，确认使用 Supabase、后台常驻同步、默认 workspace、本仓库维护 Supabase migration、新增 sync API。
 - 2026-05-04：完成设计文档和开发计划，等待用户审核。
 - 2026-05-04：Stage #1 完成 sync 配置扩展与 Supabase Postgres migration 初稿，等待验证与提交。
+- 2026-05-04：Stage #2 完成本地 `sync_changes` 生成，覆盖 note、note_revision、field、tag 和 note_tag 写入路径；已通过 `cargo fmt --check` 和 `cargo test notes`。

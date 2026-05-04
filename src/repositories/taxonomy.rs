@@ -3,6 +3,7 @@ use uuid::Uuid;
 
 use crate::models::field::FieldRecord;
 use crate::models::tag::TagRecord;
+use crate::repositories::sync::{SyncChangeInput, record_sync_change_in_transaction};
 
 /// Default workspace inserted by shared schema v0.3.0 for legacy local data.
 pub const DEFAULT_WORKSPACE_ID: &str = "00000000-0000-4000-8000-000000000300";
@@ -126,13 +127,33 @@ pub async fn get_or_create_field_in_transaction(
     .execute(&mut **transaction)
     .await?;
 
-    sqlx::query_as::<_, FieldRecord>(
+    let field = sqlx::query_as::<_, FieldRecord>(
         "SELECT id, name, created_at FROM fields WHERE workspace_id = ? AND id = ?",
     )
     .bind(DEFAULT_WORKSPACE_ID)
-    .bind(id)
+    .bind(&id)
     .fetch_one(&mut **transaction)
-    .await
+    .await?;
+
+    record_sync_change_in_transaction(
+        transaction,
+        SyncChangeInput {
+            entity_type: "field",
+            entity_id: field.id.clone(),
+            operation: "insert",
+            base_revision_id: None,
+            new_revision_id: None,
+            payload: serde_json::json!({
+                "id": field.id,
+                "workspace_id": DEFAULT_WORKSPACE_ID,
+                "name": field.name,
+                "created_at": field.created_at
+            }),
+        },
+    )
+    .await?;
+
+    Ok(field)
 }
 
 /// Returns an existing tag by name or creates it in the provided transaction.
@@ -170,13 +191,33 @@ pub async fn get_or_create_tag_in_transaction(
     .execute(&mut **transaction)
     .await?;
 
-    sqlx::query_as::<_, TagRecord>(
+    let tag = sqlx::query_as::<_, TagRecord>(
         "SELECT id, name, created_at FROM tags WHERE workspace_id = ? AND id = ?",
     )
     .bind(DEFAULT_WORKSPACE_ID)
-    .bind(id)
+    .bind(&id)
     .fetch_one(&mut **transaction)
-    .await
+    .await?;
+
+    record_sync_change_in_transaction(
+        transaction,
+        SyncChangeInput {
+            entity_type: "tag",
+            entity_id: tag.id.clone(),
+            operation: "insert",
+            base_revision_id: None,
+            new_revision_id: None,
+            payload: serde_json::json!({
+                "id": tag.id,
+                "workspace_id": DEFAULT_WORKSPACE_ID,
+                "name": tag.name,
+                "created_at": tag.created_at
+            }),
+        },
+    )
+    .await?;
+
+    Ok(tag)
 }
 
 /// Lists field records using a pool.
