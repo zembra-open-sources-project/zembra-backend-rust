@@ -1,4 +1,4 @@
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use tracing::warn;
 
@@ -45,7 +45,7 @@ pub struct LoggingSettings {
 }
 
 /// Runtime background synchronization settings.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct SyncSettings {
     /// Whether the background Supabase synchronization worker is enabled.
     #[serde(default)]
@@ -180,7 +180,7 @@ impl SyncSettings {
 ///
 /// Returns `Some(path)` when the `HOME` environment variable is available, or
 /// `None` after logging a warning when the home directory cannot be resolved.
-fn user_config_path() -> Option<PathBuf> {
+pub fn user_config_path() -> Option<PathBuf> {
     std::env::var_os("HOME")
         .map(|home| Path::new(&home).join(".zembra.env"))
         .or_else(|| {

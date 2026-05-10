@@ -99,6 +99,22 @@ impl SupabaseClient {
         Ok(changes.into_iter().map(Into::into).collect())
     }
 
+    /// Tests whether Supabase REST accepts authenticated requests.
+    ///
+    /// # Returns
+    ///
+    /// Returns `Ok(())` when the sync changes endpoint responds with success.
+    pub async fn test_connection(&self) -> Result<(), SupabaseError> {
+        let request = self
+            .client
+            .get(format!("{}/rest/v1/sync_changes", self.base_url))
+            .headers(self.headers()?)
+            .query(&[("limit", "1")])
+            .build()?;
+        let response = self.client.execute(request).await?;
+        ensure_success(response).await
+    }
+
     /// Builds an upsert request for sync changes.
     ///
     /// # Arguments

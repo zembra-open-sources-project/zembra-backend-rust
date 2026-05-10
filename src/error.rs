@@ -53,6 +53,12 @@ pub enum ApiError {
     /// Synchronization operation failed.
     #[error("Synchronization failed: {0}")]
     SyncFailed(String),
+    /// Runtime configuration validation failed.
+    #[error("Invalid configuration: {0}")]
+    InvalidConfig(String),
+    /// Runtime configuration file operation failed.
+    #[error("Configuration file operation failed.")]
+    ConfigIo(#[from] std::io::Error),
 }
 
 impl ApiError {
@@ -71,8 +77,10 @@ impl ApiError {
             Self::AmbiguousNoteReference(_) => StatusCode::CONFLICT,
             Self::DatabaseNotInitialized => StatusCode::SERVICE_UNAVAILABLE,
             Self::SyncDisabled => StatusCode::SERVICE_UNAVAILABLE,
+            Self::InvalidConfig(_) => StatusCode::BAD_REQUEST,
             Self::Database(_) => StatusCode::INTERNAL_SERVER_ERROR,
             Self::SyncFailed(_) => StatusCode::INTERNAL_SERVER_ERROR,
+            Self::ConfigIo(_) => StatusCode::INTERNAL_SERVER_ERROR,
         }
     }
 
@@ -93,6 +101,8 @@ impl ApiError {
             Self::Database(_) => "database_error",
             Self::SyncDisabled => "sync_disabled",
             Self::SyncFailed(_) => "sync_failed",
+            Self::InvalidConfig(_) => "invalid_config",
+            Self::ConfigIo(_) => "config_io_failed",
         }
     }
 }

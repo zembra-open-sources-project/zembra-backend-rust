@@ -9,6 +9,14 @@ use axum::routing::{get, post};
 pub fn router() -> Router<crate::app::AppState> {
     Router::new()
         .route("/sync/status", get(crate::handlers::sync::status))
+        .route(
+            "/sync/config",
+            get(crate::handlers::sync::config).put(crate::handlers::sync::update_config),
+        )
+        .route(
+            "/sync/config/test",
+            post(crate::handlers::sync::test_config),
+        )
         .route("/sync/run", post(crate::handlers::sync::run))
         .route("/sync/push", post(crate::handlers::sync::push))
         .route("/sync/pull", post(crate::handlers::sync::pull))

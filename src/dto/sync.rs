@@ -1,4 +1,4 @@
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
 /// Sync cursor DTO returned by status APIs.
@@ -45,6 +45,50 @@ pub struct SyncRunResponse {
 pub struct SyncDirectionResponse {
     /// Number of changes processed.
     pub processed: usize,
+}
+
+/// Sync configuration response that never exposes the service role key.
+#[derive(Debug, Clone, Serialize, ToSchema)]
+pub struct SyncConfigResponse {
+    /// Whether synchronization is enabled.
+    pub enabled: bool,
+    /// Delay in seconds between background synchronization attempts.
+    pub interval_seconds: u64,
+    /// Supabase project URL used by the backend REST client.
+    pub supabase_url: String,
+    /// Whether a service role key is currently configured.
+    pub service_role_key_configured: bool,
+}
+
+/// Request used to persist synchronization settings.
+#[derive(Debug, Clone, Deserialize, ToSchema)]
+pub struct UpdateSyncConfigRequest {
+    /// Whether synchronization should be enabled.
+    pub enabled: bool,
+    /// Delay in seconds between background synchronization attempts.
+    pub interval_seconds: u64,
+    /// Supabase project URL used by the backend REST client.
+    pub supabase_url: String,
+    /// Optional new Supabase service role key.
+    pub service_role_key: Option<String>,
+}
+
+/// Request used to test synchronization settings without persisting them.
+#[derive(Debug, Clone, Deserialize, ToSchema)]
+pub struct TestSyncConfigRequest {
+    /// Optional Supabase project URL used only for this test.
+    pub supabase_url: Option<String>,
+    /// Optional Supabase service role key used only for this test.
+    pub service_role_key: Option<String>,
+}
+
+/// Response returned by a Supabase configuration connectivity test.
+#[derive(Debug, Clone, Serialize, ToSchema)]
+pub struct SyncConfigTestResponse {
+    /// Whether the Supabase REST endpoint accepted the test request.
+    pub ok: bool,
+    /// Sanitized test result message.
+    pub message: String,
 }
 
 impl From<crate::repositories::sync::SyncStateRecord> for SyncStateResponse {

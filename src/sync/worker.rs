@@ -7,38 +7,30 @@ use tracing::{debug, error, info};
 /// # Arguments
 ///
 /// * `service` - Synchronization service to run.
-/// * `settings` - Runtime synchronization settings.
-pub fn spawn_background_sync(
-    service: crate::services::sync::SyncService,
-    settings: crate::config::SyncSettings,
-) {
-    if !settings.enabled {
-        debug!("background synchronization is disabled");
-        return;
-    }
-
-    let interval = Duration::from_secs(settings.interval_seconds);
+pub fn spawn_background_sync(service: crate::services::sync::SyncService) {
     tokio::spawn(async move {
-        info!(
-            interval_seconds = settings.interval_seconds,
-            "background synchronization worker started"
-        );
+        info!("background synchronization worker started");
 
         loop {
-            match service.run_once().await {
-                Ok(summary) => {
-                    info!(
-                        pushed = summary.pushed,
-                        pulled = summary.pulled,
-                        "background synchronization cycle finished"
-                    );
+            let settings = service.settings();
+            if settings.enabled {
+                match service.run_once().await {
+                    Ok(summary) => {
+                        info!(
+                            pushed = summary.pushed,
+                            pulled = summary.pulled,
+                            "background synchronization cycle finished"
+                        );
+                    }
+                    Err(error) => {
+                        error!(%error, "background synchronization cycle failed");
+                    }
                 }
-                Err(error) => {
-                    error!(%error, "background synchronization cycle failed");
-                }
+            } else {
+                debug!("background synchronization is disabled");
             }
 
-            tokio::time::sleep(interval).await;
+            tokio::time::sleep(Duration::from_secs(settings.interval_seconds)).await;
         }
     });
 }

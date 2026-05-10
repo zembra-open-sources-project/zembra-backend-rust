@@ -26,10 +26,12 @@ async fn main() -> Result<(), error::AppError> {
     let database_url = settings.database.sqlite_url();
     let database = repositories::database::Database::connect(&database_url).await?;
     let sync_service = services::sync::SyncService::new(database.pool.clone(), &settings.sync);
-    sync::worker::spawn_background_sync(sync_service.clone(), settings.sync.clone());
+    sync::worker::spawn_background_sync(sync_service.clone());
+    let sync_config = services::sync_config::SyncConfigService::from_user_config()?;
     let app = app::build_router(app::AppState {
         database,
         sync: sync_service,
+        sync_config,
     });
     let host = Ipv4Addr::from(settings.server.host);
     let addr = SocketAddr::from((host, settings.server.port));

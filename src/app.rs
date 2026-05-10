@@ -9,6 +9,8 @@ pub struct AppState {
     pub database: crate::repositories::database::Database,
     /// Supabase synchronization service used by sync routes and worker.
     pub sync: crate::services::sync::SyncService,
+    /// Supabase synchronization configuration service.
+    pub sync_config: crate::services::sync_config::SyncConfigService,
 }
 
 /// Builds the root HTTP router for the backend service.
@@ -39,7 +41,10 @@ mod tests {
     use axum::http::{Request, StatusCode};
     use axum::response::Response;
     use serde_json::{Value, json};
+    use std::sync::atomic::{AtomicUsize, Ordering};
     use tower::ServiceExt;
+
+    static TEST_CONFIG_COUNTER: AtomicUsize = AtomicUsize::new(0);
 
     /// Creates application state backed by an in-memory database.
     ///
@@ -53,7 +58,16 @@ mod tests {
         let settings = crate::config::SyncSettings::default();
         let sync = crate::services::sync::SyncService::new(database.pool.clone(), &settings);
 
-        super::AppState { database, sync }
+        let sync_config_id = TEST_CONFIG_COUNTER.fetch_add(1, Ordering::Relaxed);
+        let sync_config = crate::services::sync_config::SyncConfigService::new(
+            std::env::temp_dir().join(format!("zembra-test-sync-config-{sync_config_id}.toml")),
+        );
+
+        super::AppState {
+            database,
+            sync,
+            sync_config,
+        }
     }
 
     /// Sends a request to the application router in tests.
@@ -225,9 +239,86 @@ mod tests {
         assert!(body["paths"].get("/fields").is_some());
         assert!(body["paths"].get("/tags").is_some());
         assert!(body["paths"].get("/sync/status").is_some());
+        assert!(body["paths"].get("/sync/config").is_some());
+        assert!(body["paths"].get("/sync/config/test").is_some());
         assert!(body["paths"].get("/sync/run").is_some());
         assert!(body["paths"].get("/sync/push").is_some());
         assert!(body["paths"].get("/sync/pull").is_some());
+    }
+
+    #[tokio::test]
+    async fn sync_config_route_returns_sanitized_defaults() {
+        let response = send(
+            Request::builder()
+                .uri("/sync/config")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await;
+        let status = response.status();
+        let body = response_json(response).await;
+
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(body["enabled"], false);
+        assert_eq!(body["interval_seconds"], 60);
+        assert_eq!(body["service_role_key_configured"], false);
+        assert!(body.get("service_role_key").is_none());
+    }
+
+    #[tokio::test]
+    async fn update_sync_config_route_persists_sanitized_config() {
+        let state = test_state().await;
+        let response = send_with_state(
+            state,
+            Request::builder()
+                .method("PUT")
+                .uri("/sync/config")
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    json!({
+                        "enabled": false,
+                        "interval_seconds": 15,
+                        "supabase_url": "https://example.supabase.co",
+                        "service_role_key": "secret-key"
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await;
+        let status = response.status();
+        let body = response_json(response).await;
+
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(body["enabled"], false);
+        assert_eq!(body["interval_seconds"], 15);
+        assert_eq!(body["service_role_key_configured"], true);
+        assert!(body.get("service_role_key").is_none());
+    }
+
+    #[tokio::test]
+    async fn update_sync_config_route_rejects_enabled_config_without_key() {
+        let response = send(
+            Request::builder()
+                .method("PUT")
+                .uri("/sync/config")
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    json!({
+                        "enabled": true,
+                        "interval_seconds": 15,
+                        "supabase_url": "https://example.supabase.co"
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await;
+        let status = response.status();
+        let body = response_json(response).await;
+
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        assert_eq!(body["error"]["code"], "invalid_config");
     }
 
     #[tokio::test]

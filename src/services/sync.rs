@@ -1,6 +1,7 @@
 use crate::config::SyncSettings;
 use crate::repositories::sync::{SyncRepository, SyncStateRecord};
 use crate::sync::supabase::{SupabaseClient, SupabaseError};
+use std::sync::{Arc, RwLock};
 
 const SYNC_BATCH_LIMIT: i64 = 100;
 
@@ -9,10 +10,8 @@ const SYNC_BATCH_LIMIT: i64 = 100;
 pub struct SyncService {
     /// Local synchronization repository.
     repository: SyncRepository,
-    /// Supabase REST client.
-    supabase: SupabaseClient,
-    /// Whether sync operations are enabled.
-    enabled: bool,
+    /// Runtime synchronization settings.
+    settings: Arc<RwLock<SyncSettings>>,
 }
 
 impl SyncService {
@@ -29,9 +28,33 @@ impl SyncService {
     pub fn new(pool: sqlx::SqlitePool, settings: &SyncSettings) -> Self {
         Self {
             repository: SyncRepository::new(pool),
-            supabase: SupabaseClient::from_settings(settings),
-            enabled: settings.enabled,
+            settings: Arc::new(RwLock::new(settings.clone())),
         }
+    }
+
+    /// Updates runtime sync settings.
+    ///
+    /// # Arguments
+    ///
+    /// * `settings` - New synchronization settings to use for later operations.
+    pub fn update_settings(&self, settings: SyncSettings) {
+        let mut current = self
+            .settings
+            .write()
+            .expect("sync settings lock should not be poisoned");
+        *current = settings;
+    }
+
+    /// Returns a clone of the current runtime sync settings.
+    ///
+    /// # Returns
+    ///
+    /// Returns the latest settings snapshot.
+    pub fn settings(&self) -> SyncSettings {
+        self.settings
+            .read()
+            .expect("sync settings lock should not be poisoned")
+            .clone()
     }
 
     /// Runs a single push and pull cycle.
@@ -52,13 +75,15 @@ impl SyncService {
     ///
     /// Returns a push summary.
     pub async fn push(&self) -> Result<SyncDirectionSummary, SyncError> {
-        self.ensure_enabled()?;
+        let settings = self.settings();
+        self.ensure_enabled(&settings)?;
+        let supabase = SupabaseClient::from_settings(&settings);
         let changes = self
             .repository
             .list_pending_push_changes(SYNC_BATCH_LIMIT)
             .await?;
 
-        match self.supabase.upsert_sync_changes(&changes).await {
+        match supabase.upsert_sync_changes(&changes).await {
             Ok(()) => {
                 self.repository.mark_push_success(&changes).await?;
                 Ok(SyncDirectionSummary {
@@ -79,11 +104,12 @@ impl SyncService {
     ///
     /// Returns a pull summary.
     pub async fn pull(&self) -> Result<SyncDirectionSummary, SyncError> {
-        self.ensure_enabled()?;
+        let settings = self.settings();
+        self.ensure_enabled(&settings)?;
+        let supabase = SupabaseClient::from_settings(&settings);
         let state = self.repository.get_or_create_state("pull").await?;
 
-        match self
-            .supabase
+        match supabase
             .fetch_remote_changes(
                 state.last_change_created_at,
                 &state.last_change_id,
@@ -117,7 +143,7 @@ impl SyncService {
     /// Returns status rows without exposing secrets.
     pub async fn status(&self) -> Result<SyncStatus, SyncError> {
         Ok(SyncStatus {
-            enabled: self.enabled,
+            enabled: self.settings().enabled,
             states: self.repository.list_states().await?,
         })
     }
@@ -127,8 +153,8 @@ impl SyncService {
     /// # Returns
     ///
     /// Returns `Ok(())` when sync is enabled.
-    fn ensure_enabled(&self) -> Result<(), SyncError> {
-        if self.enabled {
+    fn ensure_enabled(&self, settings: &SyncSettings) -> Result<(), SyncError> {
+        if settings.enabled {
             Ok(())
         } else {
             Err(SyncError::Disabled)

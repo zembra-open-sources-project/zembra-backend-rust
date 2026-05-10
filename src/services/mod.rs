@@ -4,3 +4,4 @@
 
 pub mod notes;
 pub mod sync;
+pub mod sync_config;
