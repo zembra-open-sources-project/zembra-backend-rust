@@ -1,5 +1,7 @@
 use serde::{Deserialize, Serialize};
+use std::net::Ipv4Addr;
 use std::path::{Path, PathBuf};
+use std::str::FromStr;
 use tracing::warn;
 
 /// Runtime settings loaded from files and environment variables.
@@ -20,8 +22,8 @@ pub struct Settings {
 /// HTTP server binding settings.
 #[derive(Debug, Clone, Deserialize)]
 pub struct ServerSettings {
-    /// IPv4 host octets used to bind the HTTP server.
-    pub host: [u8; 4],
+    /// IPv4 address string used to bind the HTTP server.
+    pub host: String,
     /// TCP port used to bind the HTTP server.
     pub port: u16,
 }
@@ -142,6 +144,23 @@ impl DatabaseSettings {
     }
 }
 
+impl ServerSettings {
+    /// Parses the configured host string into an IPv4 bind address.
+    ///
+    /// # Returns
+    ///
+    /// Returns a parsed `Ipv4Addr`, or a configuration error when `server.host`
+    /// is not a valid IPv4 address string.
+    pub fn host_addr(&self) -> Result<Ipv4Addr, config::ConfigError> {
+        Ipv4Addr::from_str(self.host.trim()).map_err(|_| {
+            config::ConfigError::Message(format!(
+                "server.host must be a valid IPv4 address string, got {:?}",
+                self.host
+            ))
+        })
+    }
+}
+
 impl SyncSettings {
     /// Validates whether this synchronization configuration can run safely.
     ///
@@ -227,7 +246,8 @@ fn default_sync_interval_seconds() -> u64 {
 
 #[cfg(test)]
 mod tests {
-    use super::{DatabaseSettings, Settings, SyncSettings, sqlite_url_from_path};
+    use super::{DatabaseSettings, ServerSettings, Settings, SyncSettings, sqlite_url_from_path};
+    use std::net::Ipv4Addr;
 
     #[test]
     fn user_config_env_name_is_parsed_as_toml() {
@@ -236,7 +256,7 @@ mod tests {
                 config::File::from_str(
                     r#"
                     [server]
-                    host = [127, 0, 0, 1]
+                    host = "127.0.0.1"
                     port = 3010
 
                     [database]
@@ -252,6 +272,7 @@ mod tests {
             .expect("test TOML config should deserialize");
 
         assert_eq!(settings.server.port, 3010);
+        assert_eq!(settings.server.host, "127.0.0.1");
         assert_eq!(settings.database.path, "data/custom-zembra.db");
         assert_eq!(settings.logging.level, "INFO");
         assert_eq!(settings.logging.path, "logs");
@@ -268,7 +289,7 @@ mod tests {
                 config::File::from_str(
                     r#"
                     [server]
-                    host = [127, 0, 0, 1]
+                    host = "127.0.0.1"
                     port = 3010
 
                     [database]
@@ -298,7 +319,7 @@ mod tests {
                 config::File::from_str(
                     r#"
                     [server]
-                    host = [127, 0, 0, 1]
+                    host = "127.0.0.1"
                     port = 3010
 
                     [database]
@@ -363,6 +384,36 @@ mod tests {
         };
 
         assert!(settings.validate().is_err());
+    }
+
+    #[test]
+    fn server_host_parses_loopback_ipv4_string() {
+        let settings = ServerSettings {
+            host: "127.0.0.1".to_string(),
+            port: 3000,
+        };
+
+        assert_eq!(settings.host_addr().unwrap(), Ipv4Addr::new(127, 0, 0, 1));
+    }
+
+    #[test]
+    fn server_host_parses_unspecified_ipv4_string() {
+        let settings = ServerSettings {
+            host: "0.0.0.0".to_string(),
+            port: 3000,
+        };
+
+        assert_eq!(settings.host_addr().unwrap(), Ipv4Addr::new(0, 0, 0, 0));
+    }
+
+    #[test]
+    fn server_host_rejects_non_ipv4_strings() {
+        let settings = ServerSettings {
+            host: "localhost".to_string(),
+            port: 3000,
+        };
+
+        assert!(settings.host_addr().is_err());
     }
 
     #[test]

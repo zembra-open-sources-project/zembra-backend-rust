@@ -11,7 +11,7 @@ mod routes;
 mod services;
 mod sync;
 
-use std::net::{Ipv4Addr, SocketAddr};
+use std::net::SocketAddr;
 
 /// Starts the Zembra backend HTTP server.
 ///
@@ -33,7 +33,7 @@ async fn main() -> Result<(), error::AppError> {
         sync: sync_service,
         sync_config,
     });
-    let host = Ipv4Addr::from(settings.server.host);
+    let host = settings.server.host_addr()?;
     let addr = SocketAddr::from((host, settings.server.port));
     let listener = tokio::net::TcpListener::bind(addr).await?;
 
