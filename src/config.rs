@@ -1,3 +1,4 @@
+use axum::http::HeaderValue;
 use serde::{Deserialize, Serialize};
 use std::net::Ipv4Addr;
 use std::path::{Path, PathBuf};
@@ -26,6 +27,9 @@ pub struct ServerSettings {
     pub host: String,
     /// TCP port used to bind the HTTP server.
     pub port: u16,
+    /// Browser origins allowed to access the HTTP API through CORS.
+    #[serde(default)]
+    pub cors_allowed_origins: Vec<String>,
 }
 
 /// SQLite database connection settings.
@@ -159,6 +163,27 @@ impl ServerSettings {
             ))
         })
     }
+
+    /// Parses configured CORS origins into HTTP header values.
+    ///
+    /// # Returns
+    ///
+    /// Returns header values that can be passed to the CORS layer, or a
+    /// configuration error when any configured origin is not a valid header
+    /// value.
+    pub fn cors_origin_values(&self) -> Result<Vec<HeaderValue>, config::ConfigError> {
+        self.cors_allowed_origins
+            .iter()
+            .map(|origin| {
+                HeaderValue::from_str(origin.trim()).map_err(|_| {
+                    config::ConfigError::Message(format!(
+                        "server.cors_allowed_origins contains an invalid origin: {:?}",
+                        origin
+                    ))
+                })
+            })
+            .collect()
+    }
 }
 
 impl SyncSettings {
@@ -246,6 +271,8 @@ fn default_sync_interval_seconds() -> u64 {
 
 #[cfg(test)]
 mod tests {
+    use axum::http::HeaderValue;
+
     use super::{DatabaseSettings, ServerSettings, Settings, SyncSettings, sqlite_url_from_path};
     use std::net::Ipv4Addr;
 
@@ -391,6 +418,7 @@ mod tests {
         let settings = ServerSettings {
             host: "127.0.0.1".to_string(),
             port: 3000,
+            cors_allowed_origins: Vec::new(),
         };
 
         assert_eq!(settings.host_addr().unwrap(), Ipv4Addr::new(127, 0, 0, 1));
@@ -401,6 +429,7 @@ mod tests {
         let settings = ServerSettings {
             host: "0.0.0.0".to_string(),
             port: 3000,
+            cors_allowed_origins: Vec::new(),
         };
 
         assert_eq!(settings.host_addr().unwrap(), Ipv4Addr::new(0, 0, 0, 0));
@@ -411,9 +440,49 @@ mod tests {
         let settings = ServerSettings {
             host: "localhost".to_string(),
             port: 3000,
+            cors_allowed_origins: Vec::new(),
         };
 
         assert!(settings.host_addr().is_err());
+    }
+
+    #[test]
+    fn server_cors_origins_default_to_empty_list() {
+        let settings: Settings = config::Config::builder()
+            .add_source(
+                config::File::from_str(
+                    r#"
+                    [server]
+                    host = "127.0.0.1"
+                    port = 3010
+
+                    [database]
+                    path = "data/custom-zembra.db"
+                    "#,
+                    config::FileFormat::Toml,
+                )
+                .format(config::FileFormat::Toml),
+            )
+            .build()
+            .expect("test TOML config should build")
+            .try_deserialize()
+            .expect("test TOML config should deserialize");
+
+        assert!(settings.server.cors_allowed_origins.is_empty());
+    }
+
+    #[test]
+    fn server_cors_origins_parse_header_values() {
+        let settings = ServerSettings {
+            host: "127.0.0.1".to_string(),
+            port: 3000,
+            cors_allowed_origins: vec!["http://192.168.1.20:5173".to_string()],
+        };
+
+        assert_eq!(
+            settings.cors_origin_values().unwrap(),
+            vec![HeaderValue::from_static("http://192.168.1.20:5173")]
+        );
     }
 
     #[test]

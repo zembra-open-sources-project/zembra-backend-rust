@@ -1,4 +1,6 @@
 use axum::Router;
+use axum::http::{HeaderValue, Method, header::CONTENT_TYPE};
+use tower_http::cors::CorsLayer;
 use utoipa::OpenApi;
 use utoipa_swagger_ui::SwaggerUi;
 
@@ -23,6 +25,20 @@ pub struct AppState {
 ///
 /// Returns an Axum router containing infrastructure routes only.
 pub fn build_router(state: AppState) -> Router {
+    build_router_with_cors(state, Vec::new())
+}
+
+/// Builds the root HTTP router with explicit CORS origins.
+///
+/// # Arguments
+///
+/// * `state` - Shared application state injected into route handlers.
+/// * `cors_allowed_origins` - Browser origins allowed to call the API.
+///
+/// # Returns
+///
+/// Returns an Axum router with API routes, Swagger UI, and CORS handling.
+pub fn build_router_with_cors(state: AppState, cors_allowed_origins: Vec<HeaderValue>) -> Router {
     Router::new()
         .merge(crate::routes::health::router())
         .merge(crate::routes::notes::router())
@@ -32,13 +48,40 @@ pub fn build_router(state: AppState) -> Router {
             SwaggerUi::new("/swagger-ui")
                 .url("/api-docs/openapi.json", crate::api_doc::ApiDoc::openapi()),
         )
+        .layer(cors_layer(cors_allowed_origins))
         .with_state(state)
+}
+
+/// Builds the CORS layer used for browser clients.
+///
+/// # Arguments
+///
+/// * `cors_allowed_origins` - Browser origins allowed to call the API.
+///
+/// # Returns
+///
+/// Returns a `CorsLayer` that allows configured origins and common API methods.
+fn cors_layer(cors_allowed_origins: Vec<HeaderValue>) -> CorsLayer {
+    CorsLayer::new()
+        .allow_origin(cors_allowed_origins)
+        .allow_methods([
+            Method::GET,
+            Method::POST,
+            Method::PUT,
+            Method::PATCH,
+            Method::DELETE,
+            Method::OPTIONS,
+        ])
+        .allow_headers([CONTENT_TYPE])
 }
 
 #[cfg(test)]
 mod tests {
     use axum::body::{Body, to_bytes};
-    use axum::http::{Request, StatusCode};
+    use axum::http::{
+        HeaderValue, Method, Request, StatusCode,
+        header::{ACCESS_CONTROL_ALLOW_ORIGIN, ACCESS_CONTROL_REQUEST_METHOD, ORIGIN},
+    };
     use axum::response::Response;
     use serde_json::{Value, json};
     use std::sync::atomic::{AtomicUsize, Ordering};
@@ -95,6 +138,28 @@ mod tests {
     /// Returns the HTTP response produced by the router.
     async fn send_with_state(state: super::AppState, request: Request<Body>) -> Response {
         super::build_router(state).oneshot(request).await.unwrap()
+    }
+
+    /// Sends a request to the application router with explicit CORS origins.
+    ///
+    /// # Arguments
+    ///
+    /// * `state` - Shared application state for the router.
+    /// * `cors_allowed_origins` - Browser origins allowed by the router.
+    /// * `request` - HTTP request to dispatch through the router.
+    ///
+    /// # Returns
+    ///
+    /// Returns the HTTP response produced by the router.
+    async fn send_with_cors(
+        state: super::AppState,
+        cors_allowed_origins: Vec<HeaderValue>,
+        request: Request<Body>,
+    ) -> Response {
+        super::build_router_with_cors(state, cors_allowed_origins)
+            .oneshot(request)
+            .await
+            .unwrap()
     }
 
     /// Creates a note through the notes service.
@@ -164,6 +229,53 @@ mod tests {
         .await;
 
         assert_eq!(response.status(), StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn cors_preflight_allows_configured_origin() {
+        let origin = HeaderValue::from_static("http://192.168.1.20:5173");
+        let response = send_with_cors(
+            test_state().await,
+            vec![origin.clone()],
+            Request::builder()
+                .method(Method::OPTIONS)
+                .uri("/notes")
+                .header(ORIGIN, origin.clone())
+                .header(ACCESS_CONTROL_REQUEST_METHOD, "POST")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await;
+
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(
+            response.headers().get(ACCESS_CONTROL_ALLOW_ORIGIN),
+            Some(&origin)
+        );
+    }
+
+    #[tokio::test]
+    async fn cors_preflight_rejects_unconfigured_origin() {
+        let response = send_with_cors(
+            test_state().await,
+            vec![HeaderValue::from_static("http://192.168.1.20:5173")],
+            Request::builder()
+                .method(Method::OPTIONS)
+                .uri("/notes")
+                .header(ORIGIN, "http://192.168.1.30:5173")
+                .header(ACCESS_CONTROL_REQUEST_METHOD, "POST")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await;
+
+        assert_eq!(response.status(), StatusCode::OK);
+        assert!(
+            response
+                .headers()
+                .get(ACCESS_CONTROL_ALLOW_ORIGIN)
+                .is_none()
+        );
     }
 
     #[tokio::test]

@@ -38,7 +38,7 @@
 
 ### Task #3: 增加 CORS 配置字段
 
-**Status:** Designed
+**Status:** Finished
 
 **Files:** Modify `src/config.rs`, Modify `config/default.toml`, Modify `.env.example`
 
@@ -50,7 +50,7 @@
 
 ### Task #4: 在 Axum router 上挂载 CORS layer
 
-**Status:** Designed
+**Status:** Finished
 
 **Files:** Modify `Cargo.toml`, Modify `src/app.rs`, Modify `src/main.rs`
 
@@ -62,7 +62,7 @@
 
 ### Task #5: 补充 CORS 路由测试
 
-**Status:** Designed
+**Status:** Finished
 
 **Files:** Modify `src/app.rs`
 
@@ -119,3 +119,5 @@
 - 2026-05-15：完成开发计划，等待用户审核。
 - 2026-05-15：开始 Stage #1，实现 `server.host` 标准 IP 字符串配置和对应测试。
 - 2026-05-15：完成 Stage #1，`cargo fmt --check` 和 `cargo test config` 通过。
+- 2026-05-15：开始 Stage #2，实现 `server.cors_allowed_origins` 配置、CORS layer 和预检测试。
+- 2026-05-15：完成 Stage #2，`cargo fmt --check` 和 `cargo test` 通过，54 个测试通过。

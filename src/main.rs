@@ -28,11 +28,14 @@ async fn main() -> Result<(), error::AppError> {
     let sync_service = services::sync::SyncService::new(database.pool.clone(), &settings.sync);
     sync::worker::spawn_background_sync(sync_service.clone());
     let sync_config = services::sync_config::SyncConfigService::from_user_config()?;
-    let app = app::build_router(app::AppState {
-        database,
-        sync: sync_service,
-        sync_config,
-    });
+    let app = app::build_router_with_cors(
+        app::AppState {
+            database,
+            sync: sync_service,
+            sync_config,
+        },
+        settings.server.cors_origin_values()?,
+    );
     let host = settings.server.host_addr()?;
     let addr = SocketAddr::from((host, settings.server.port));
     let listener = tokio::net::TcpListener::bind(addr).await?;
