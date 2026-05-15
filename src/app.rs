@@ -103,9 +103,10 @@ mod tests {
         let sync = crate::services::sync::SyncService::new(database.pool.clone(), &settings);
 
         let sync_config_id = TEST_CONFIG_COUNTER.fetch_add(1, Ordering::Relaxed);
-        let sync_config = crate::services::sync_config::SyncConfigService::new(
-            std::env::temp_dir().join(format!("zembra-test-sync-config-{sync_config_id}.toml")),
-        );
+        let sync_config_path =
+            std::env::temp_dir().join(format!("zembra-test-sync-config-{sync_config_id}.toml"));
+        let _ = std::fs::remove_file(&sync_config_path);
+        let sync_config = crate::services::sync_config::SyncConfigService::new(sync_config_path);
 
         super::AppState {
             database,
