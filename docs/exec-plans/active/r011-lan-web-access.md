@@ -76,7 +76,7 @@
 
 ### Task #6: 增加局域网部署说明
 
-**Status:** Designed
+**Status:** Finished
 
 **Files:** Create or Modify `docs/references/lan-web-access.md`, Modify `docs/design-docs/r011-lan-web-access.md` if design细节需要同步
 
@@ -121,3 +121,4 @@
 - 2026-05-15：完成 Stage #1，`cargo fmt --check` 和 `cargo test config` 通过。
 - 2026-05-15：开始 Stage #2，实现 `server.cors_allowed_origins` 配置、CORS layer 和预检测试。
 - 2026-05-15：完成 Stage #2，`cargo fmt --check` 和 `cargo test` 通过，54 个测试通过。
+- 2026-05-15：完成 Stage #3，新增 `docs/references/lan-web-access.md` 普通 Linux 主机局域网部署说明。
