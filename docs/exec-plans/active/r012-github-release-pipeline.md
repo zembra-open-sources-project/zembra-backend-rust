@@ -37,7 +37,7 @@
 
 ### Task #1: 新增 Release workflow
 
-**Status:** Designed
+**Status:** Finished
 
 **Files:** Create `.github/workflows/release.yml`
 
@@ -47,9 +47,11 @@
 
 **Expected Verification Result:** `vX.Y.Z` tag 与 Cargo 版本一致时进入构建，不一致时 workflow 失败。
 
+**Verification Result:** 2026-05-15 已在 `.github/workflows/release.yml` 中实现 tag 与 `Cargo.toml package.version` 一致性校验。
+
 ### Task #2: 构建并打包发布产物
 
-**Status:** Designed
+**Status:** Finished
 
 **Files:** Modify `.github/workflows/release.yml`
 
@@ -59,9 +61,11 @@
 
 **Expected Verification Result:** GitHub Release assets 包含 tar.gz 和 `SHA256SUMS`，tar.gz 内容符合发布范围。
 
+**Verification Result:** 2026-05-15 已在 Release workflow 中实现 Linux x86_64、macOS x86_64、macOS arm64 产物打包，并在发布前生成 `SHA256SUMS`。本地已通过 `cargo build --release --locked` 验证 release binary 可构建。
+
 ### Task #3: Release 前置验证
 
-**Status:** Designed
+**Status:** Finished
 
 **Files:** Modify `.github/workflows/release.yml`
 
@@ -70,6 +74,8 @@
 **Implementation Notes:** Release workflow 在打包前运行 `cargo fmt --check`、`cargo test --locked`、`cargo clippy --locked -- -D warnings`。
 
 **Expected Verification Result:** 任一验证失败时，Release 不创建或不上传产物。
+
+**Verification Result:** 2026-05-15 已在 Release workflow 中加入 `cargo fmt --check`、`cargo test --locked`、`cargo clippy --locked -- -D warnings` 前置验证；build job 依赖 verify job 完成后才执行。
 
 ## Stage #3: 发布文档
 
