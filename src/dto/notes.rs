@@ -24,6 +24,14 @@ pub struct RecentNotesRequest {
     pub note_uuid: Option<String>,
 }
 
+/// Query parameters used by the random tags endpoint.
+#[derive(Debug, Clone, Deserialize, Validate, IntoParams)]
+pub struct RandomTagsQuery {
+    /// Number of random tags to return.
+    #[validate(range(min = 1, max = 20))]
+    pub n: Option<i64>,
+}
+
 /// Request body for creating a single note.
 #[derive(Debug, Clone, Deserialize, Validate, ToSchema)]
 pub struct CreateNoteRequest {
@@ -70,6 +78,22 @@ pub struct BatchCreateNotesResponse {
 #[derive(Debug, Clone, Serialize, ToSchema)]
 pub struct ListNotesResponse {
     /// Note records.
+    pub notes: Vec<NoteRecord>,
+}
+
+/// Response body for random tagged notes.
+#[derive(Debug, Clone, Serialize, ToSchema)]
+pub struct TaggedNotesResponse {
+    /// Random tag groups with their visible notes.
+    pub tagged_notes: Vec<TaggedNotesGroup>,
+}
+
+/// Notes grouped under one randomly selected tag.
+#[derive(Debug, Clone, Serialize, ToSchema)]
+pub struct TaggedNotesGroup {
+    /// Randomly selected tag.
+    pub tag: TagRecord,
+    /// Visible notes associated with the tag.
     pub notes: Vec<NoteRecord>,
 }
 

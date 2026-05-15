@@ -171,6 +171,56 @@ impl NotesRepository {
         }
     }
 
+    /// Lists random tags from the default workspace.
+    ///
+    /// # Arguments
+    ///
+    /// * `limit` - Maximum number of tags to return.
+    ///
+    /// # Returns
+    ///
+    /// Returns randomly ordered tag records.
+    pub async fn random_tags(&self, limit: i64) -> Result<Vec<TagRecord>, ApiError> {
+        sqlx::query_as::<_, TagRecord>(
+            "SELECT id, name, created_at FROM tags WHERE workspace_id = ? ORDER BY RANDOM() LIMIT ?",
+        )
+        .bind(DEFAULT_WORKSPACE_ID)
+        .bind(limit)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(ApiError::from)
+    }
+
+    /// Lists visible notes associated with a tag.
+    ///
+    /// # Arguments
+    ///
+    /// * `tag_id` - Exact tag identifier.
+    ///
+    /// # Returns
+    ///
+    /// Returns non-deleted and non-archived note records for the tag.
+    pub async fn list_visible_notes_by_tag(
+        &self,
+        tag_id: &str,
+    ) -> Result<Vec<NoteRecord>, ApiError> {
+        sqlx::query_as::<_, NoteRecord>(
+            "SELECT notes.id, notes.content, notes.role, notes.field_id, notes.created_at, notes.updated_at, notes.archived_at, notes.deleted_at, notes.current_revision_id \
+             FROM notes \
+             INNER JOIN note_tags ON notes.workspace_id = note_tags.workspace_id AND notes.id = note_tags.note_id \
+             WHERE note_tags.workspace_id = ? \
+             AND note_tags.tag_id = ? \
+             AND notes.deleted_at IS NULL \
+             AND notes.archived_at IS NULL \
+             ORDER BY notes.updated_at DESC, notes.id DESC",
+        )
+        .bind(DEFAULT_WORKSPACE_ID)
+        .bind(tag_id)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(ApiError::from)
+    }
+
     /// Reads a visible note by exact ID.
     ///
     /// # Arguments
@@ -1224,5 +1274,46 @@ mod tests {
         assert!(matches!(invalid, Err(ApiError::Validation)));
         assert!(matches!(hidden, Err(ApiError::RecordNotFound(_))));
         assert!(matches!(missing, Err(ApiError::RecordNotFound(_))));
+    }
+
+    #[tokio::test]
+    async fn random_tags_returns_existing_tags_when_limit_is_larger() {
+        let repository = notes_repository().await;
+        repository.create_note(input("first")).await.unwrap();
+
+        let tags = repository.random_tags(20).await.unwrap();
+
+        assert_eq!(tags.len(), 2);
+        assert!(
+            tags.iter()
+                .all(|tag| tag.name == "rust" || tag.name == "sqlite")
+        );
+    }
+
+    #[tokio::test]
+    async fn list_visible_notes_by_tag_filters_hidden_records() {
+        let repository = notes_repository().await;
+        let visible = repository.create_note(input("visible")).await.unwrap();
+        let archived = repository.create_note(input("archived")).await.unwrap();
+        let deleted = repository.create_note(input("deleted")).await.unwrap();
+        repository.archive_note(&archived.note.id).await.unwrap();
+        repository.delete_note(&deleted.note.id).await.unwrap();
+        let tag = repository
+            .list_note_tags(&visible.note.id)
+            .await
+            .unwrap()
+            .into_iter()
+            .find(|tag| tag.name == "rust")
+            .unwrap();
+
+        let notes = repository.list_visible_notes_by_tag(&tag.id).await.unwrap();
+
+        assert_eq!(
+            notes
+                .iter()
+                .map(|note| note.content.as_str())
+                .collect::<Vec<_>>(),
+            vec!["visible"]
+        );
     }
 }

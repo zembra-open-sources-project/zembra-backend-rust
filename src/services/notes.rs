@@ -1,8 +1,8 @@
 use sqlx::SqlitePool;
 
 use crate::dto::notes::{
-    BatchCreateNotesResponse, CreateNoteRequest, NoteMetadata, NoteResponse, RecentNotesRequest,
-    UpdateNoteRequest,
+    BatchCreateNotesResponse, CreateNoteRequest, NoteMetadata, NoteResponse, RandomTagsQuery,
+    RecentNotesRequest, TaggedNotesGroup, TaggedNotesResponse, UpdateNoteRequest,
 };
 use crate::error::ApiError;
 use crate::models::note::NoteRecord;
@@ -107,6 +107,31 @@ impl NotesService {
         self.repository
             .list_recent_notes(limit, request.note_uuid.as_deref())
             .await
+    }
+
+    /// Lists notes grouped by randomly selected tags.
+    ///
+    /// # Arguments
+    ///
+    /// * `query` - Validated random tags query.
+    ///
+    /// # Returns
+    ///
+    /// Returns tagged note groups under the `tagged_notes` response field.
+    pub async fn random_tagged_notes(
+        &self,
+        query: RandomTagsQuery,
+    ) -> Result<TaggedNotesResponse, ApiError> {
+        let limit = query.n.unwrap_or(3);
+        let tags = self.repository.random_tags(limit).await?;
+        let mut tagged_notes = Vec::with_capacity(tags.len());
+
+        for tag in tags {
+            let notes = self.repository.list_visible_notes_by_tag(&tag.id).await?;
+            tagged_notes.push(TaggedNotesGroup { tag, notes });
+        }
+
+        Ok(TaggedNotesResponse { tagged_notes })
     }
 
     /// Reads a note by reference.

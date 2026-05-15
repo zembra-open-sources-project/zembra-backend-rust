@@ -236,12 +236,31 @@ mod tests {
     ///
     /// Returns the created note ID.
     async fn create_note(state: &super::AppState, content: &str) -> String {
+        create_tagged_note(state, content, Vec::new()).await
+    }
+
+    /// Creates a note with tags through the notes service.
+    ///
+    /// # Arguments
+    ///
+    /// * `state` - Shared application state.
+    /// * `content` - Note body content.
+    /// * `tags` - Tag names to associate with the note.
+    ///
+    /// # Returns
+    ///
+    /// Returns the created note ID.
+    async fn create_tagged_note(
+        state: &super::AppState,
+        content: &str,
+        tags: Vec<String>,
+    ) -> String {
         let service = crate::services::notes::NotesService::new(state.database.pool.clone());
         service
             .create_note(crate::dto::notes::CreateNoteRequest {
                 content: content.to_string(),
                 field: None,
-                tags: Vec::new(),
+                tags,
                 role: "Human".to_string(),
                 device_id: None,
             })
@@ -480,6 +499,7 @@ mod tests {
         assert!(body["paths"].get("/health").is_some());
         assert!(body["paths"].get("/notes").is_some());
         assert!(body["paths"].get("/notes/recent").is_some());
+        assert!(body["paths"].get("/random/tags").is_some());
         assert!(body["paths"].get("/notes/batch").is_some());
         assert!(body["paths"].get("/fields").is_some());
         assert!(body["paths"].get("/tags").is_some());
@@ -750,6 +770,116 @@ mod tests {
 
         assert_eq!(status, StatusCode::NOT_FOUND);
         assert_eq!(body["error"]["code"], "record_not_found");
+    }
+
+    #[tokio::test]
+    async fn random_tags_route_groups_visible_notes_by_tag() {
+        let state = test_state().await;
+        let shared = create_tagged_note(
+            &state,
+            "shared",
+            vec!["rust".to_string(), "sqlite".to_string()],
+        )
+        .await;
+        let rust_only = create_tagged_note(&state, "rust only", vec!["rust".to_string()]).await;
+        let archived = create_tagged_note(&state, "archived", vec!["rust".to_string()]).await;
+        let deleted = create_tagged_note(&state, "deleted", vec!["sqlite".to_string()]).await;
+        let service = crate::services::notes::NotesService::new(state.database.pool.clone());
+        service.archive_note(&archived).await.unwrap();
+        service.delete_note(&deleted).await.unwrap();
+
+        let response = send_with_state(
+            state,
+            Request::builder()
+                .uri("/random/tags?n=2")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await;
+        let status = response.status();
+        let body = response_json(response).await;
+        let groups = body["tagged_notes"].as_array().unwrap();
+        let shared_count = groups
+            .iter()
+            .filter(|group| {
+                group["notes"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .any(|note| note["id"] == shared)
+            })
+            .count();
+        let rust_count = groups
+            .iter()
+            .flat_map(|group| group["notes"].as_array().unwrap())
+            .filter(|note| note["id"] == rust_only)
+            .count();
+
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(groups.len(), 2);
+        assert_eq!(shared_count, 2);
+        assert_eq!(rust_count, 1);
+        assert!(
+            groups
+                .iter()
+                .flat_map(|group| group["notes"].as_array().unwrap())
+                .all(|note| note["content"] != "archived" && note["content"] != "deleted")
+        );
+    }
+
+    #[tokio::test]
+    async fn random_tags_route_returns_existing_tags_when_n_is_larger() {
+        let state = test_state().await;
+        create_tagged_note(&state, "rust", vec!["rust".to_string()]).await;
+        create_tagged_note(&state, "sqlite", vec!["sqlite".to_string()]).await;
+
+        let response = send_with_state(
+            state,
+            Request::builder()
+                .uri("/random/tags?n=20")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await;
+        let status = response.status();
+        let body = response_json(response).await;
+
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(body["tagged_notes"].as_array().unwrap().len(), 2);
+    }
+
+    #[tokio::test]
+    async fn random_tags_route_uses_default_limit() {
+        let state = test_state().await;
+        for name in ["alpha", "beta", "gamma", "delta"] {
+            create_tagged_note(&state, name, vec![name.to_string()]).await;
+        }
+
+        let response = send_with_state(
+            state,
+            Request::builder()
+                .uri("/random/tags")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await;
+        let status = response.status();
+        let body = response_json(response).await;
+
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(body["tagged_notes"].as_array().unwrap().len(), 3);
+    }
+
+    #[tokio::test]
+    async fn random_tags_route_rejects_invalid_n() {
+        for uri in ["/random/tags?n=0", "/random/tags?n=21"] {
+            let response = send(Request::builder().uri(uri).body(Body::empty()).unwrap()).await;
+            let status = response.status();
+            let body = response_json(response).await;
+
+            assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+            assert_eq!(body["error"]["code"], "validation_error");
+        }
     }
 
     #[tokio::test]
