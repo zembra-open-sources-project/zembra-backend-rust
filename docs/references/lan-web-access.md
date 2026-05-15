@@ -16,7 +16,7 @@
 [server]
 host = "0.0.0.0"
 port = 3000
-cors_allowed_origins = ["http://192.168.1.20:5173"]
+cors_allowed_origins = []
 
 [database]
 path = "/home/zembra/data/zembra.db"
@@ -38,11 +38,11 @@ service_role_key = ""
 | --- | --- |
 | `server.host` | `"0.0.0.0"` 表示监听所有 IPv4 网卡，局域网其他机器可以访问 |
 | `server.port` | 后端 API 端口 |
-| `server.cors_allowed_origins` | 允许访问后端的网页前端 origin，必须包含协议、IP 或域名、端口 |
+| `server.cors_allowed_origins` | 额外允许访问后端的网页前端 origin，必须包含协议、IP 或域名、端口 |
 | `database.path` | SQLite 数据库文件路径，建议使用主机上的持久化目录 |
 | `logging.path` | 日志目录，建议使用主机上的持久化目录 |
 
-如果前端页面运行在 `http://192.168.1.20:5173`，就把这个完整 origin 加入 `cors_allowed_origins`。如果前端换了机器或端口，需要同步更新这个字段。
+后端默认允许本机开发 origin 访问，例如 `http://localhost:5173` 和 `http://127.0.0.1:5173`。如果前端页面运行在局域网其他机器，例如 `http://192.168.1.20:5173`，就把这个完整 origin 加入 `cors_allowed_origins`。
 
 ## 启动前检查
 
@@ -96,7 +96,7 @@ http://192.168.1.10:3000
 | 检查项 | 期望 |
 | --- | --- |
 | 前端 origin | 与浏览器地址栏中的协议、主机、端口完全一致 |
-| `cors_allowed_origins` | 包含前端 origin |
+| `cors_allowed_origins` | 局域网其他机器、自定义域名或非本机 origin 已加入额外白名单 |
 | 后端配置 | 修改 `.zembra.env` 后已重启后端 |
 | 网络连通 | 其他机器可以打开 `/health` |
 

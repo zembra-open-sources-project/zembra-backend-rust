@@ -123,3 +123,4 @@
 - 2026-05-15：完成 Stage #2，`cargo fmt --check` 和 `cargo test` 通过，54 个测试通过。
 - 2026-05-15：完成 Stage #3，新增 `docs/references/lan-web-access.md` 普通 Linux 主机局域网部署说明。
 - 2026-05-15：完成 Stage #4，已通过 `cargo fmt --check`、`cargo check`、`cargo test` 和 `cargo clippy -- -D warnings`，其中 `cargo test` 为 54 passed。
+- 2026-05-15：根据本地前端访问反馈修正 CORS 默认策略，空配置下默认只放行 localhost 和 loopback origin，局域网其他机器 origin 仍需显式配置。

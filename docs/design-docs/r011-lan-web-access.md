@@ -104,12 +104,12 @@ cors_allowed_origins = ["http://192.168.1.20:5173"]
 
 | 项目 | 策略 |
 | --- | --- |
-| Origin | 只允许 `server.cors_allowed_origins` 中列出的 origin |
+| Origin | 默认允许 localhost 和 loopback origin；`server.cors_allowed_origins` 用于局域网其他机器或自定义域名白名单 |
 | Methods | 允许现有 API 需要的 `GET`、`POST`、`PUT`、`PATCH`、`DELETE`、`OPTIONS` |
 | Headers | 允许 `content-type`；认证后续实现时再加入 `authorization` |
 | Credentials | 本次不启用 credentials |
 
-暂不采用 `Any` 全放开策略。家庭局域网虽然可信，但前端网页访问场景天然受浏览器 origin 约束，配置化白名单更适合后续平滑加入认证。
+暂不采用 `Any` 全放开策略。默认只放行本机开发 origin，局域网其他机器和自定义域名通过配置化白名单补充。
 
 ### 启动流程
 

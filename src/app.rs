@@ -1,6 +1,7 @@
 use axum::Router;
 use axum::http::{HeaderValue, Method, header::CONTENT_TYPE};
-use tower_http::cors::CorsLayer;
+use std::net::IpAddr;
+use tower_http::cors::{AllowOrigin, CorsLayer};
 use utoipa::OpenApi;
 use utoipa_swagger_ui::SwaggerUi;
 
@@ -63,8 +64,13 @@ pub fn build_router_with_cors(state: AppState, cors_allowed_origins: Vec<HeaderV
 ///
 /// Returns a `CorsLayer` that allows configured origins and common API methods.
 fn cors_layer(cors_allowed_origins: Vec<HeaderValue>) -> CorsLayer {
+    let configured_origins = cors_allowed_origins;
+
     CorsLayer::new()
-        .allow_origin(cors_allowed_origins)
+        .allow_origin(AllowOrigin::predicate(move |origin, _request_head| {
+            configured_origins.iter().any(|allowed| allowed == origin)
+                || is_local_browser_origin(origin)
+        }))
         .allow_methods([
             Method::GET,
             Method::POST,
@@ -74,6 +80,61 @@ fn cors_layer(cors_allowed_origins: Vec<HeaderValue>) -> CorsLayer {
             Method::OPTIONS,
         ])
         .allow_headers([CONTENT_TYPE])
+}
+
+/// Checks whether an origin belongs to local development.
+///
+/// # Arguments
+///
+/// * `origin` - Browser `Origin` header value.
+///
+/// # Returns
+///
+/// Returns `true` for localhost and loopback origins.
+fn is_local_browser_origin(origin: &HeaderValue) -> bool {
+    let Ok(origin) = origin.to_str() else {
+        return false;
+    };
+
+    let Some(host) = origin_host(origin) else {
+        return false;
+    };
+
+    if host.eq_ignore_ascii_case("localhost") {
+        return true;
+    }
+
+    match host.parse::<IpAddr>() {
+        Ok(IpAddr::V4(ip)) => ip.is_loopback(),
+        Ok(IpAddr::V6(ip)) => ip.is_loopback(),
+        Err(_) => false,
+    }
+}
+
+/// Extracts the host portion from a browser origin string.
+///
+/// # Arguments
+///
+/// * `origin` - Browser origin string with scheme, host, and optional port.
+///
+/// # Returns
+///
+/// Returns the host string when the origin uses HTTP or HTTPS.
+fn origin_host(origin: &str) -> Option<&str> {
+    let authority = origin
+        .strip_prefix("http://")
+        .or_else(|| origin.strip_prefix("https://"))?;
+
+    let authority = authority.split('/').next().unwrap_or(authority);
+
+    if authority.starts_with('[') {
+        return authority
+            .strip_prefix('[')?
+            .split_once(']')
+            .map(|(host, _)| host);
+    }
+
+    Some(authority.split(':').next().unwrap_or(authority))
 }
 
 #[cfg(test)]
@@ -257,14 +318,84 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn cors_preflight_rejects_unconfigured_origin() {
+    async fn cors_preflight_allows_default_localhost_origin() {
+        let origin = HeaderValue::from_static("http://localhost:5173");
+        let response = send_with_cors(
+            test_state().await,
+            Vec::new(),
+            Request::builder()
+                .method(Method::OPTIONS)
+                .uri("/notes")
+                .header(ORIGIN, origin.clone())
+                .header(ACCESS_CONTROL_REQUEST_METHOD, "POST")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await;
+
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(
+            response.headers().get(ACCESS_CONTROL_ALLOW_ORIGIN),
+            Some(&origin)
+        );
+    }
+
+    #[tokio::test]
+    async fn cors_preflight_allows_default_loopback_origin() {
+        let origin = HeaderValue::from_static("http://127.0.0.1:5173");
+        let response = send_with_cors(
+            test_state().await,
+            Vec::new(),
+            Request::builder()
+                .method(Method::OPTIONS)
+                .uri("/notes")
+                .header(ORIGIN, origin.clone())
+                .header(ACCESS_CONTROL_REQUEST_METHOD, "POST")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await;
+
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(
+            response.headers().get(ACCESS_CONTROL_ALLOW_ORIGIN),
+            Some(&origin)
+        );
+    }
+
+    #[tokio::test]
+    async fn cors_preflight_requires_config_for_private_lan_origin() {
+        let response = send_with_cors(
+            test_state().await,
+            Vec::new(),
+            Request::builder()
+                .method(Method::OPTIONS)
+                .uri("/notes")
+                .header(ORIGIN, "http://192.168.1.20:5173")
+                .header(ACCESS_CONTROL_REQUEST_METHOD, "POST")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await;
+
+        assert_eq!(response.status(), StatusCode::OK);
+        assert!(
+            response
+                .headers()
+                .get(ACCESS_CONTROL_ALLOW_ORIGIN)
+                .is_none()
+        );
+    }
+
+    #[tokio::test]
+    async fn cors_preflight_rejects_public_unconfigured_origin() {
         let response = send_with_cors(
             test_state().await,
             vec![HeaderValue::from_static("http://192.168.1.20:5173")],
             Request::builder()
                 .method(Method::OPTIONS)
                 .uri("/notes")
-                .header(ORIGIN, "http://192.168.1.30:5173")
+                .header(ORIGIN, "https://example.com")
                 .header(ACCESS_CONTROL_REQUEST_METHOD, "POST")
                 .body(Body::empty())
                 .unwrap(),
