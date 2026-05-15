@@ -90,7 +90,7 @@
 
 ### Task #7: 回归验证
 
-**Status:** Designed
+**Status:** Finished
 
 **Files:** Verify repository
 
@@ -102,7 +102,7 @@
 
 ### Task #8: 更新执行记录
 
-**Status:** Designed
+**Status:** Finished
 
 **Files:** Modify `docs/exec-plans/active/r011-lan-web-access.md`, Modify `docs/PROGRESS.md`
 
@@ -122,3 +122,4 @@
 - 2026-05-15：开始 Stage #2，实现 `server.cors_allowed_origins` 配置、CORS layer 和预检测试。
 - 2026-05-15：完成 Stage #2，`cargo fmt --check` 和 `cargo test` 通过，54 个测试通过。
 - 2026-05-15：完成 Stage #3，新增 `docs/references/lan-web-access.md` 普通 Linux 主机局域网部署说明。
+- 2026-05-15：完成 Stage #4，已通过 `cargo fmt --check`、`cargo check`、`cargo test` 和 `cargo clippy -- -D warnings`，其中 `cargo test` 为 54 passed。

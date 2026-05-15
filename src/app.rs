@@ -24,6 +24,7 @@ pub struct AppState {
 /// # Returns
 ///
 /// Returns an Axum router containing infrastructure routes only.
+#[cfg(test)]
 pub fn build_router(state: AppState) -> Router {
     build_router_with_cors(state, Vec::new())
 }
