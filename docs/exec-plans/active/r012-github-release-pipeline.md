@@ -81,7 +81,7 @@
 
 ### Task #1: 新增发布使用文档
 
-**Status:** Designed
+**Status:** Finished
 
 **Files:** Create or Modify docs release guide
 
@@ -91,9 +91,11 @@
 
 **Expected Verification Result:** 用户可以只根据文档完成下载、配置、启动和基础健康检查。
 
+**Verification Result:** 2026-05-15 已新增 `docs/release.md`，覆盖下载、校验、配置、启动、健康检查、OpenAPI 和 Swagger UI。
+
 ### Task #2: 记录 Docker/GHCR 后续范围
 
-**Status:** Designed
+**Status:** Finished
 
 **Files:** Modify docs release guide or `docs/exec-plans/tech-debt-tracker.md`
 
@@ -103,9 +105,11 @@
 
 **Expected Verification Result:** 本轮实现不会静默扩展到 Docker 或 GHCR。
 
+**Verification Result:** 2026-05-15 已在 `docs/release.md` 记录 Dockerfile、GHCR 和自动版本工具为后续范围。
+
 ### Task #3: 整体验证和计划回写
 
-**Status:** Designed
+**Status:** Finished
 
 **Files:** Modify `docs/exec-plans/active/r012-github-release-pipeline.md`
 
@@ -114,3 +118,5 @@
 **Implementation Notes:** 记录本地验证命令结果；如已经推送测试 tag，则记录 GitHub Actions 和 Release assets 验证结果。每个 Stage 修改代码后按项目规则进行一次原子提交，commit message 必须满足 `^(feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert): .{10,}$`。
 
 **Expected Verification Result:** 执行计划准确反映实现状态和验证结果，等待用户验收，不自动归档到 completed。
+
+**Verification Result:** 2026-05-15 已通过 workflow YAML 解析检查、`cargo fmt --check`、`cargo check --locked`、`cargo test --locked`（54 passed）、`cargo clippy --locked -- -D warnings`，并已通过 `cargo build --release --locked` 验证 release binary 可构建。执行计划保持在 active，等待用户验收。
