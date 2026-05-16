@@ -73,6 +73,32 @@
 | Implementation Notes | 运行 `cargo fmt --check`、`cargo check`、`cargo test`、`cargo clippy`；记录验证结果和任务完成状态 |
 | Expected Verification Result | 四项验证通过，计划状态与实际代码一致 |
 
+## Stage #3: Random Tags count 参数扩展
+
+### Task #1: 扩展 DTO、Repository 和 Service 累计 count 支持
+
+**Status:** Finished
+
+**Files:** Modify `src/dto/notes.rs`, `src/repositories/notes.rs`, `src/services/notes.rs`
+
+| 项目 | 内容 |
+| --- | --- |
+| Function | `RandomTagsQuery.count`、`NotesRepository::list_visible_notes_by_tag`、`NotesService::random_tagged_notes` |
+| Implementation Notes | `count` 可选，范围 1 到 100，默认 20；repository 按 tag ID 随机查询可见 notes 并支持 limit；service 按随机 tag 顺序逐组分配剩余额度，所有 notes 累计不超过 `count` |
+| Expected Verification Result | `GET /random/tags?n=N&count=CNT` 返回的所有 notes 总数不超过 `CNT` |
+
+### Task #2: 补齐 count 参数测试和验证记录
+
+**Status:** Finished
+
+**Files:** Modify `src/app.rs`, `src/repositories/notes.rs`, `docs/exec-plans/active/r013-random-tags-api.md`
+
+| 项目 | 内容 |
+| --- | --- |
+| Function | random tags count tests、progress record |
+| Implementation Notes | 覆盖默认 `count`、合法 `count`、`count = 0`、`count = 101`、累计 count、软删除/归档过滤和 OpenAPI query 暴露；运行完整验证并回写执行记录 |
+| Expected Verification Result | `cargo fmt --check`、`cargo check`、`cargo test`、`cargo clippy` 全部通过 |
+
 ## 执行记录
 
 - 2026-05-16：完成需求澄清，确认 `GET /random/tags?n=N` 使用 query 参数 `n`，范围 1 到 20，按随机 tag 分组返回 `tagged_notes`，notes 只包含未删除、未归档记录。
@@ -80,6 +106,9 @@
 - 2026-05-16：完成 Stage #1，新增 `RandomTagsQuery`、`TaggedNotesResponse`、`TaggedNotesGroup`、repository 随机 tag/可见 notes 查询、service 组装、`GET /random/tags` handler、route 和 OpenAPI 注册。
 - 2026-05-16：完成 Stage #2，新增 random tags repository/API 测试，覆盖默认 `n`、合法 `n`、`n = 0`、`n = 21`、tag 不足、软删除过滤、归档过滤、重复 note 分组和 OpenAPI path 暴露。
 - 2026-05-16：最终验证通过：`cargo fmt --check`、`cargo check`、`cargo test`（63 passed）、`cargo clippy`。
+- 2026-05-16：确认 random tags API 增量扩展，新增 `count` query 参数，默认 20，范围 1 到 100，用于限制所有 tag 分组内 notes 的累计数量。
+- 2026-05-16：完成 Stage #3，扩展 `RandomTagsQuery.count`、`NotesRepository::list_visible_notes_by_tag` limit 查询和 `NotesService::random_tagged_notes` 累计 count 组装，补齐 API/repository 测试。
+- 2026-05-16：Stage #3 验证通过：`cargo fmt --check`、`cargo check`、`cargo test`（76 passed）、`cargo clippy`。
 
 ## 约束
 

@@ -6,7 +6,7 @@
 
 ## 核心功能（WHAT）
 
-新增 `GET /random/tags`，通过 query 参数 `n` 指定随机 tag 数量。接口每次请求从现有 tags 中实时随机抽取 `n` 个 tag，并按 tag 分组返回这些 tag 下所有未删除、未归档 notes。顶级响应字段固定为 `tagged_notes`。
+新增 `GET /random/tags`，通过 query 参数 `n` 指定随机 tag 数量，通过 `count` 指定所有 tag 分组累计返回的 note 数量上限。接口每次请求从现有 tags 中实时随机抽取 `n` 个 tag，并按 tag 分组返回未删除、未归档 notes。顶级响应字段固定为 `tagged_notes`。
 
 ### 需求背景（WHY）
 
@@ -16,8 +16,9 @@
 
 | 目标 | 说明 |
 | --- | --- |
-| 新增随机发现接口 | 提供 `GET /random/tags?n=N` |
-| 限制随机规模 | `n` 合法范围为 1 到 20 |
+| 新增随机发现接口 | 提供 `GET /random/tags?n=N&count=CNT` |
+| 限制随机规模 | `n` 合法范围为 1 到 20，默认 3 |
+| 限制 note 总量 | `count` 合法范围为 1 到 100，默认 20 |
 | tag 不足兼容 | 可用 tag 少于 `n` 时返回现有数量 |
 | 按 tag 分组 | 顶级字段为 `tagged_notes`，每项包含 tag 和 notes |
 | 过滤不可展示内容 | notes 只返回未删除、未归档记录 |
@@ -30,9 +31,9 @@ In Scope：
 
 | 范围 | 内容 |
 | --- | --- |
-| DTO | 新增 random tags query 和响应 DTO，包含 `n` 校验、tag 分组响应 |
+| DTO | 新增 random tags query 和响应 DTO，包含 `n`、`count` 校验、tag 分组响应 |
 | Repository | 新增随机 tag 查询和按 tag 查询可见 notes 的读取方法 |
-| Service | 组装随机 tag 和对应 notes，返回 `tagged_notes` |
+| Service | 组装随机 tag 和对应 notes，并控制累计 notes 不超过 `count` |
 | Handler | 新增 `GET /random/tags` handler，解析 query、校验并返回响应 |
 | Routes | 注册 `/random/tags` 路由 |
 | OpenAPI | 注册 path、query 参数、response schema 和错误响应 |
@@ -68,7 +69,7 @@ Out of Scope：
 | --- | --- |
 | Method | `GET` |
 | Path | `/random/tags` |
-| Query | `n` |
+| Query | `n`、`count` |
 | Response Body | `TaggedNotesResponse` |
 | Tag | `notes` |
 
@@ -77,6 +78,7 @@ Query 参数：
 | 字段 | 类型 | 必填 | 默认值 | 约束 | 说明 |
 | --- | --- | --- | --- | --- | --- |
 | `n` | integer | 否 | 3 | 1 到 20 | 随机抽取的 tag 数量 |
+| `count` | integer | 否 | 20 | 1 到 100 | 所有 tag 分组累计返回 notes 上限 |
 
 响应体：
 
@@ -107,19 +109,23 @@ Query 参数：
 | 规则 | 设计 |
 | --- | --- |
 | 默认数量 | `n` 不传时使用 3 |
-| 数量范围 | 小于 1 或大于 20 返回 `422 validation_error` |
+| 默认 note 数 | `count` 为 `None` 时使用 20 |
+| 数量范围 | `n` 小于 1 或大于 20 返回 `422 validation_error` |
+| note 数范围 | `count` 小于 1 或大于 100 返回 `422 validation_error` |
 | 随机 tag | 使用 SQLite `ORDER BY RANDOM() LIMIT ?` 从当前 workspace tags 中抽取 |
 | tag 数不足 | SQL 返回多少就组装多少，不额外报错 |
 | notes 过滤 | 查询 notes 时使用 `deleted_at IS NULL` 和 `archived_at IS NULL` |
+| notes 随机 | 每个 tag 下 notes 使用 `ORDER BY RANDOM()` 获取，提升发现随机性 |
 | 分组规则 | 每个随机 tag 独立查询并生成一个 group |
 | 重复 note | 不做跨 group 去重 |
-| notes 排序 | 每个 tag 下的 notes 按 `updated_at DESC, id DESC` 返回，保证组内稳定可读 |
+| 累计 count | service 按随机 tag 顺序逐组分配剩余额度，所有 notes 总数不超过 `count` |
 
 ### 错误响应
 
 | 场景 | HTTP 状态 | code |
 | --- | --- | --- |
 | `n` 校验失败 | `422` | `validation_error` |
+| `count` 校验失败 | `422` | `validation_error` |
 | SQLite 访问失败 | `500` | `database_error` |
 
 ## 测试用例
@@ -137,11 +143,13 @@ Query 参数：
 
 | 用例 | 预期 |
 | --- | --- |
-| 默认参数 | `GET /random/tags` 使用默认 `n = 3` |
-| 合法参数 | `GET /random/tags?n=2` 返回最多 2 个 tag group |
+| 默认参数 | `GET /random/tags` 使用默认 `n = 3`、`count = 20` |
+| 合法参数 | `GET /random/tags?n=2&count=3` 返回最多 2 个 tag group，notes 累计最多 3 条 |
 | 下界校验 | `n = 0` 返回 `422 validation_error` |
 | 上界校验 | `n = 21` 返回 `422 validation_error` |
+| count 校验 | `count = 0` 或 `count = 101` 返回 `422 validation_error` |
 | tag 不足 | 可用 tag 少于 `n` 时请求成功并返回现有 tag 数 |
+| 累计 count | 所有 tag group 内 notes 总数不超过 `count` |
 | 软删除过滤 | 软删除 note 不出现在任何 group 的 notes 中 |
 | 归档过滤 | 已归档 note 不出现在任何 group 的 notes 中 |
 | 重复 note | 同一 note 关联多个抽中 tag 时，可出现在多个 group 中 |

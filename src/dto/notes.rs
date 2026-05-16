@@ -31,6 +31,9 @@ pub struct RandomTagsQuery {
     /// Number of random tags to return.
     #[validate(range(min = 1, max = 20))]
     pub n: Option<i64>,
+    /// Maximum cumulative number of notes to return across tags.
+    #[validate(range(min = 1, max = 100))]
+    pub count: Option<i64>,
 }
 
 /// Query parameters used by the random fields endpoint.

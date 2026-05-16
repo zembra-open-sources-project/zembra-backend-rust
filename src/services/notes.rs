@@ -123,12 +123,22 @@ impl NotesService {
         &self,
         query: RandomTagsQuery,
     ) -> Result<TaggedNotesResponse, ApiError> {
-        let limit = query.n.unwrap_or(3);
-        let tags = self.repository.random_tags(limit).await?;
+        let tag_limit = query.n.unwrap_or(3);
+        let mut remaining_notes = query.count.unwrap_or(20);
+        let tags = self.repository.random_tags(tag_limit).await?;
         let mut tagged_notes = Vec::with_capacity(tags.len());
 
         for tag in tags {
-            let notes = self.repository.list_visible_notes_by_tag(&tag.id).await?;
+            let notes = if remaining_notes > 0 {
+                let notes = self
+                    .repository
+                    .list_visible_notes_by_tag(&tag.id, remaining_notes)
+                    .await?;
+                remaining_notes -= notes.len() as i64;
+                notes
+            } else {
+                Vec::new()
+            };
             tagged_notes.push(TaggedNotesGroup { tag, notes });
         }
 

@@ -967,7 +967,7 @@ mod tests {
         let response = send_with_state(
             state,
             Request::builder()
-                .uri("/random/tags?n=2")
+                .uri("/random/tags?n=2&count=10")
                 .body(Body::empty())
                 .unwrap(),
         )
@@ -1004,6 +1004,34 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn random_tags_route_limits_cumulative_notes() {
+        let state = test_state().await;
+        for content in ["first", "second", "third"] {
+            create_tagged_note(&state, content, vec!["rust".to_string()]).await;
+        }
+
+        let response = send_with_state(
+            state,
+            Request::builder()
+                .uri("/random/tags?n=1&count=2")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await;
+        let status = response.status();
+        let body = response_json(response).await;
+        let groups = body["tagged_notes"].as_array().unwrap();
+        let notes_count = groups
+            .iter()
+            .map(|group| group["notes"].as_array().unwrap().len())
+            .sum::<usize>();
+
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(groups.len(), 1);
+        assert_eq!(notes_count, 2);
+    }
+
+    #[tokio::test]
     async fn random_tags_route_returns_existing_tags_when_n_is_larger() {
         let state = test_state().await;
         create_tagged_note(&state, "rust", vec!["rust".to_string()]).await;
@@ -1030,6 +1058,9 @@ mod tests {
         for name in ["alpha", "beta", "gamma", "delta"] {
             create_tagged_note(&state, name, vec![name.to_string()]).await;
         }
+        for index in 0..25 {
+            create_tagged_note(&state, &format!("extra {index}"), vec!["alpha".to_string()]).await;
+        }
 
         let response = send_with_state(
             state,
@@ -1044,11 +1075,25 @@ mod tests {
 
         assert_eq!(status, StatusCode::OK);
         assert_eq!(body["tagged_notes"].as_array().unwrap().len(), 3);
+        assert!(
+            body["tagged_notes"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|group| group["notes"].as_array().unwrap().len())
+                .sum::<usize>()
+                <= 20
+        );
     }
 
     #[tokio::test]
-    async fn random_tags_route_rejects_invalid_n() {
-        for uri in ["/random/tags?n=0", "/random/tags?n=21"] {
+    async fn random_tags_route_rejects_invalid_query_values() {
+        for uri in [
+            "/random/tags?n=0",
+            "/random/tags?n=21",
+            "/random/tags?count=0",
+            "/random/tags?count=101",
+        ] {
             let response = send(Request::builder().uri(uri).body(Body::empty()).unwrap()).await;
             let status = response.status();
             let body = response_json(response).await;

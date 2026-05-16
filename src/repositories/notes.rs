@@ -197,6 +197,7 @@ impl NotesRepository {
     /// # Arguments
     ///
     /// * `tag_id` - Exact tag identifier.
+    /// * `limit` - Maximum number of notes to return.
     ///
     /// # Returns
     ///
@@ -204,6 +205,7 @@ impl NotesRepository {
     pub async fn list_visible_notes_by_tag(
         &self,
         tag_id: &str,
+        limit: i64,
     ) -> Result<Vec<NoteRecord>, ApiError> {
         sqlx::query_as::<_, NoteRecord>(
             "SELECT notes.id, notes.content, notes.role, notes.field_id, notes.created_at, notes.updated_at, notes.archived_at, notes.deleted_at, notes.current_revision_id \
@@ -213,10 +215,11 @@ impl NotesRepository {
              AND note_tags.tag_id = ? \
              AND notes.deleted_at IS NULL \
              AND notes.archived_at IS NULL \
-             ORDER BY notes.updated_at DESC, notes.id DESC",
+             ORDER BY RANDOM() LIMIT ?",
         )
         .bind(DEFAULT_WORKSPACE_ID)
         .bind(tag_id)
+        .bind(limit)
         .fetch_all(&self.pool)
         .await
         .map_err(ApiError::from)
@@ -1359,7 +1362,10 @@ mod tests {
             .find(|tag| tag.name == "rust")
             .unwrap();
 
-        let notes = repository.list_visible_notes_by_tag(&tag.id).await.unwrap();
+        let notes = repository
+            .list_visible_notes_by_tag(&tag.id, 10)
+            .await
+            .unwrap();
 
         assert_eq!(
             notes
@@ -1368,6 +1374,27 @@ mod tests {
                 .collect::<Vec<_>>(),
             vec!["visible"]
         );
+    }
+
+    #[tokio::test]
+    async fn list_visible_notes_by_tag_applies_limit() {
+        let repository = notes_repository().await;
+        let first = repository.create_note(input("first")).await.unwrap();
+        repository.create_note(input("second")).await.unwrap();
+        let tag = repository
+            .list_note_tags(&first.note.id)
+            .await
+            .unwrap()
+            .into_iter()
+            .find(|tag| tag.name == "rust")
+            .unwrap();
+
+        let notes = repository
+            .list_visible_notes_by_tag(&tag.id, 1)
+            .await
+            .unwrap();
+
+        assert_eq!(notes.len(), 1);
     }
 
     #[tokio::test]
