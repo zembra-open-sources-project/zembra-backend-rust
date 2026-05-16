@@ -7,8 +7,8 @@ use validator::Validate;
 use crate::dto::notes::{
     BatchCreateNotesRequest, BatchCreateNotesResponse, CreateNoteRequest, FieldNotesResponse,
     ListNoteRevisionsResponse, ListNoteTagsResponse, ListNotesQuery, ListNotesResponse,
-    NoteResponse, RandomFieldsQuery, RandomTagsQuery, RecentNotesRequest, TaggedNotesResponse,
-    UpdateNoteRequest,
+    NoteResponse, RandomFieldsQuery, RandomNotesQuery, RandomTagsQuery, RecentNotesRequest,
+    TaggedNotesResponse, UpdateNoteRequest,
 };
 use crate::error::ApiError;
 use crate::services::notes::NotesService;
@@ -74,6 +74,39 @@ pub async fn recent_notes(
 
     let service = NotesService::new(state.database.pool);
     let notes = service.recent_notes(request).await?;
+
+    Ok(Json(ListNotesResponse { notes }))
+}
+
+/// Lists random visible notes.
+///
+/// # Arguments
+///
+/// * `state` - Shared application state.
+/// * `query` - Random notes query parameters.
+///
+/// # Returns
+///
+/// Returns random non-deleted and non-archived notes.
+#[utoipa::path(
+    get,
+    path = "/random/notes",
+    tag = "notes",
+    params(RandomNotesQuery),
+    responses(
+        (status = 200, description = "Random visible notes", body = ListNotesResponse),
+        (status = 422, description = "Validation error", body = crate::dto::error::ErrorResponse),
+        (status = 500, description = "Database error", body = crate::dto::error::ErrorResponse)
+    )
+)]
+pub async fn random_notes(
+    State(state): State<crate::app::AppState>,
+    Query(query): Query<RandomNotesQuery>,
+) -> Result<Json<ListNotesResponse>, ApiError> {
+    query.validate().map_err(|_| ApiError::Validation)?;
+
+    let service = NotesService::new(state.database.pool);
+    let notes = service.random_notes(query).await?;
 
     Ok(Json(ListNotesResponse { notes }))
 }

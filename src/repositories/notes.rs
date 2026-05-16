@@ -172,6 +172,31 @@ impl NotesRepository {
         }
     }
 
+    /// Lists random visible notes.
+    ///
+    /// # Arguments
+    ///
+    /// * `limit` - Maximum number of notes to return.
+    ///
+    /// # Returns
+    ///
+    /// Returns random non-deleted and non-archived note records.
+    pub async fn list_random_notes(&self, limit: i64) -> Result<Vec<NoteRecord>, ApiError> {
+        sqlx::query_as::<_, NoteRecord>(
+            "SELECT id, content, role, field_id, created_at, updated_at, archived_at, deleted_at, current_revision_id \
+             FROM notes \
+             WHERE workspace_id = ? \
+             AND deleted_at IS NULL \
+             AND archived_at IS NULL \
+             ORDER BY RANDOM() LIMIT ?",
+        )
+        .bind(DEFAULT_WORKSPACE_ID)
+        .bind(limit)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(ApiError::from)
+    }
+
     /// Lists random tags from the default workspace.
     ///
     /// # Arguments
@@ -1330,6 +1355,31 @@ mod tests {
         assert!(matches!(invalid, Err(ApiError::Validation)));
         assert!(matches!(hidden, Err(ApiError::RecordNotFound(_))));
         assert!(matches!(missing, Err(ApiError::RecordNotFound(_))));
+    }
+
+    #[tokio::test]
+    async fn list_random_notes_filters_hidden_records_and_applies_limit() {
+        let repository = notes_repository().await;
+        repository.create_note(input("first")).await.unwrap();
+        repository.create_note(input("second")).await.unwrap();
+        let archived = repository.create_note(input("archived")).await.unwrap();
+        let deleted = repository.create_note(input("deleted")).await.unwrap();
+        repository.archive_note(&archived.note.id).await.unwrap();
+        repository.delete_note(&deleted.note.id).await.unwrap();
+
+        let notes = repository.list_random_notes(1).await.unwrap();
+
+        assert_eq!(notes.len(), 1);
+        assert!(notes[0].content == "first" || notes[0].content == "second");
+    }
+
+    #[tokio::test]
+    async fn list_random_notes_returns_empty_when_none_exist() {
+        let repository = notes_repository().await;
+
+        let notes = repository.list_random_notes(50).await.unwrap();
+
+        assert!(notes.is_empty());
     }
 
     #[tokio::test]

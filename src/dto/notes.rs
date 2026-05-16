@@ -47,6 +47,14 @@ pub struct RandomFieldsQuery {
     pub count: Option<i64>,
 }
 
+/// Query parameters used by the random notes endpoint.
+#[derive(Debug, Clone, Deserialize, Validate, IntoParams)]
+pub struct RandomNotesQuery {
+    /// Number of random notes to return.
+    #[validate(range(min = 1, max = 50))]
+    pub n: i64,
+}
+
 /// Request body for creating a single note.
 #[derive(Debug, Clone, Deserialize, Validate, ToSchema)]
 pub struct CreateNoteRequest {

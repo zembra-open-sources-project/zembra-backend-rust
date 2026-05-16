@@ -674,6 +674,7 @@ mod tests {
         assert!(body["paths"].get("/health").is_some());
         assert!(body["paths"].get("/notes").is_some());
         assert!(body["paths"].get("/notes/recent").is_some());
+        assert!(body["paths"].get("/random/notes").is_some());
         assert!(body["paths"].get("/random/tags").is_some());
         assert!(body["paths"].get("/random/fields").is_some());
         assert!(body["paths"].get("/notes/batch").is_some());
@@ -946,6 +947,88 @@ mod tests {
 
         assert_eq!(status, StatusCode::NOT_FOUND);
         assert_eq!(body["error"]["code"], "record_not_found");
+    }
+
+    #[tokio::test]
+    async fn random_notes_route_returns_random_visible_notes() {
+        let state = test_state().await;
+        create_note(&state, "first").await;
+        create_note(&state, "second").await;
+        let archived = create_note(&state, "archived").await;
+        let deleted = create_note(&state, "deleted").await;
+        let service = crate::services::notes::NotesService::new(state.database.pool.clone());
+        service.archive_note(&archived).await.unwrap();
+        service.delete_note(&deleted).await.unwrap();
+
+        let response = send_with_state(
+            state,
+            Request::builder()
+                .uri("/random/notes?n=50")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await;
+        let status = response.status();
+        let body = response_json(response).await;
+        let notes = body["notes"].as_array().unwrap();
+
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(notes.len(), 2);
+        assert!(
+            notes
+                .iter()
+                .all(|note| note["content"] == "first" || note["content"] == "second")
+        );
+    }
+
+    #[tokio::test]
+    async fn random_notes_route_applies_limit() {
+        let state = test_state().await;
+        create_note(&state, "first").await;
+        create_note(&state, "second").await;
+        create_note(&state, "third").await;
+
+        let response = send_with_state(
+            state,
+            Request::builder()
+                .uri("/random/notes?n=2")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await;
+        let status = response.status();
+        let body = response_json(response).await;
+
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(body["notes"].as_array().unwrap().len(), 2);
+    }
+
+    #[tokio::test]
+    async fn random_notes_route_returns_empty_when_no_visible_notes_exist() {
+        let response = send(
+            Request::builder()
+                .uri("/random/notes?n=5")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await;
+        let status = response.status();
+        let body = response_json(response).await;
+
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(body["notes"], json!([]));
+    }
+
+    #[tokio::test]
+    async fn random_notes_route_rejects_invalid_n() {
+        for uri in ["/random/notes?n=0", "/random/notes?n=51"] {
+            let response = send(Request::builder().uri(uri).body(Body::empty()).unwrap()).await;
+            let status = response.status();
+            let body = response_json(response).await;
+
+            assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+            assert_eq!(body["error"]["code"], "validation_error");
+        }
     }
 
     #[tokio::test]

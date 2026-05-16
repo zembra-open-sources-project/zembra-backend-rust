@@ -2,8 +2,8 @@ use sqlx::SqlitePool;
 
 use crate::dto::notes::{
     BatchCreateNotesResponse, CreateNoteRequest, FieldNotesGroup, FieldNotesResponse, NoteMetadata,
-    NoteResponse, RandomFieldsQuery, RandomTagsQuery, RecentNotesRequest, TaggedNotesGroup,
-    TaggedNotesResponse, UpdateNoteRequest,
+    NoteResponse, RandomFieldsQuery, RandomNotesQuery, RandomTagsQuery, RecentNotesRequest,
+    TaggedNotesGroup, TaggedNotesResponse, UpdateNoteRequest,
 };
 use crate::error::ApiError;
 use crate::models::note::NoteRecord;
@@ -108,6 +108,19 @@ impl NotesService {
         self.repository
             .list_recent_notes(limit, request.note_uuid.as_deref())
             .await
+    }
+
+    /// Lists random visible notes.
+    ///
+    /// # Arguments
+    ///
+    /// * `query` - Validated random notes query.
+    ///
+    /// # Returns
+    ///
+    /// Returns random non-deleted and non-archived note records.
+    pub async fn random_notes(&self, query: RandomNotesQuery) -> Result<Vec<NoteRecord>, ApiError> {
+        self.repository.list_random_notes(query.n).await
     }
 
     /// Lists notes grouped by randomly selected tags.

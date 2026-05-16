@@ -7,6 +7,7 @@ use utoipa::OpenApi;
         crate::handlers::health::health,
         crate::handlers::notes::list_notes,
         crate::handlers::notes::recent_notes,
+        crate::handlers::notes::random_notes,
         crate::handlers::notes::random_tagged_notes,
         crate::handlers::notes::random_field_notes,
         crate::handlers::notes::create_note,

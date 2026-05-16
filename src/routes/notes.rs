@@ -17,6 +17,7 @@ pub fn router() -> Router<crate::app::AppState> {
             "/random/tags",
             get(crate::handlers::notes::random_tagged_notes),
         )
+        .route("/random/notes", get(crate::handlers::notes::random_notes))
         .route(
             "/random/fields",
             get(crate::handlers::notes::random_field_notes),
