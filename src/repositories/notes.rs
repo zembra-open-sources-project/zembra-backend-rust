@@ -1,6 +1,7 @@
 use sqlx::{Sqlite, SqlitePool, Transaction};
 
 use crate::error::ApiError;
+use crate::models::field::FieldRecord;
 use crate::models::note::NoteRecord;
 use crate::models::revision::NoteRevisionRecord;
 use crate::models::tag::TagRecord;
@@ -216,6 +217,58 @@ impl NotesRepository {
         )
         .bind(DEFAULT_WORKSPACE_ID)
         .bind(tag_id)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(ApiError::from)
+    }
+
+    /// Lists random fields from the default workspace.
+    ///
+    /// # Arguments
+    ///
+    /// * `limit` - Maximum number of fields to return.
+    ///
+    /// # Returns
+    ///
+    /// Returns randomly ordered field records.
+    pub async fn random_fields(&self, limit: i64) -> Result<Vec<FieldRecord>, ApiError> {
+        sqlx::query_as::<_, FieldRecord>(
+            "SELECT id, name, created_at FROM fields WHERE workspace_id = ? ORDER BY RANDOM() LIMIT ?",
+        )
+        .bind(DEFAULT_WORKSPACE_ID)
+        .bind(limit)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(ApiError::from)
+    }
+
+    /// Lists random visible notes associated with a field.
+    ///
+    /// # Arguments
+    ///
+    /// * `field_id` - Exact field identifier.
+    /// * `limit` - Maximum number of notes to return.
+    ///
+    /// # Returns
+    ///
+    /// Returns non-deleted and non-archived note records for the field.
+    pub async fn list_visible_notes_by_field(
+        &self,
+        field_id: &str,
+        limit: i64,
+    ) -> Result<Vec<NoteRecord>, ApiError> {
+        sqlx::query_as::<_, NoteRecord>(
+            "SELECT id, content, role, field_id, created_at, updated_at, archived_at, deleted_at, current_revision_id \
+             FROM notes \
+             WHERE workspace_id = ? \
+             AND field_id = ? \
+             AND deleted_at IS NULL \
+             AND archived_at IS NULL \
+             ORDER BY RANDOM() LIMIT ?",
+        )
+        .bind(DEFAULT_WORKSPACE_ID)
+        .bind(field_id)
+        .bind(limit)
         .fetch_all(&self.pool)
         .await
         .map_err(ApiError::from)
@@ -1315,5 +1368,39 @@ mod tests {
                 .collect::<Vec<_>>(),
             vec!["visible"]
         );
+    }
+
+    #[tokio::test]
+    async fn random_fields_returns_existing_fields_when_limit_is_larger() {
+        let repository = notes_repository().await;
+        repository.create_note(input("first")).await.unwrap();
+
+        let fields = repository.random_fields(20).await.unwrap();
+
+        assert_eq!(fields.len(), 1);
+        assert_eq!(fields[0].name, "work");
+    }
+
+    #[tokio::test]
+    async fn list_visible_notes_by_field_filters_hidden_records_and_applies_limit() {
+        let repository = notes_repository().await;
+        let visible = repository.create_note(input("visible")).await.unwrap();
+        repository
+            .create_note(input("second visible"))
+            .await
+            .unwrap();
+        let archived = repository.create_note(input("archived")).await.unwrap();
+        let deleted = repository.create_note(input("deleted")).await.unwrap();
+        repository.archive_note(&archived.note.id).await.unwrap();
+        repository.delete_note(&deleted.note.id).await.unwrap();
+        let field_id = visible.note.field_id.as_deref().unwrap();
+
+        let notes = repository
+            .list_visible_notes_by_field(field_id, 1)
+            .await
+            .unwrap();
+
+        assert_eq!(notes.len(), 1);
+        assert!(notes[0].content == "visible" || notes[0].content == "second visible");
     }
 }

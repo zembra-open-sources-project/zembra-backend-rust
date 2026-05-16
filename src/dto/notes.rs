@@ -2,6 +2,7 @@ use serde::{Deserialize, Serialize};
 use utoipa::{IntoParams, ToSchema};
 use validator::Validate;
 
+use crate::models::field::FieldRecord;
 use crate::models::note::NoteRecord;
 use crate::models::revision::NoteRevisionRecord;
 use crate::models::tag::TagRecord;
@@ -30,6 +31,17 @@ pub struct RandomTagsQuery {
     /// Number of random tags to return.
     #[validate(range(min = 1, max = 20))]
     pub n: Option<i64>,
+}
+
+/// Query parameters used by the random fields endpoint.
+#[derive(Debug, Clone, Deserialize, Validate, IntoParams)]
+pub struct RandomFieldsQuery {
+    /// Number of random fields to return.
+    #[validate(range(min = 1, max = 20))]
+    pub n: Option<i64>,
+    /// Maximum cumulative number of notes to return across fields.
+    #[validate(range(min = 1, max = 100))]
+    pub count: Option<i64>,
 }
 
 /// Request body for creating a single note.
@@ -94,6 +106,22 @@ pub struct TaggedNotesGroup {
     /// Randomly selected tag.
     pub tag: TagRecord,
     /// Visible notes associated with the tag.
+    pub notes: Vec<NoteRecord>,
+}
+
+/// Response body for random field notes.
+#[derive(Debug, Clone, Serialize, ToSchema)]
+pub struct FieldNotesResponse {
+    /// Random field groups with their visible notes.
+    pub field_notes: Vec<FieldNotesGroup>,
+}
+
+/// Notes grouped under one randomly selected field.
+#[derive(Debug, Clone, Serialize, ToSchema)]
+pub struct FieldNotesGroup {
+    /// Randomly selected field.
+    pub field: FieldRecord,
+    /// Visible notes associated with the field.
     pub notes: Vec<NoteRecord>,
 }
 

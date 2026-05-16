@@ -1,8 +1,9 @@
 use sqlx::SqlitePool;
 
 use crate::dto::notes::{
-    BatchCreateNotesResponse, CreateNoteRequest, NoteMetadata, NoteResponse, RandomTagsQuery,
-    RecentNotesRequest, TaggedNotesGroup, TaggedNotesResponse, UpdateNoteRequest,
+    BatchCreateNotesResponse, CreateNoteRequest, FieldNotesGroup, FieldNotesResponse, NoteMetadata,
+    NoteResponse, RandomFieldsQuery, RandomTagsQuery, RecentNotesRequest, TaggedNotesGroup,
+    TaggedNotesResponse, UpdateNoteRequest,
 };
 use crate::error::ApiError;
 use crate::models::note::NoteRecord;
@@ -132,6 +133,41 @@ impl NotesService {
         }
 
         Ok(TaggedNotesResponse { tagged_notes })
+    }
+
+    /// Lists notes grouped by randomly selected fields.
+    ///
+    /// # Arguments
+    ///
+    /// * `query` - Validated random fields query.
+    ///
+    /// # Returns
+    ///
+    /// Returns field note groups under the `field_notes` response field.
+    pub async fn random_field_notes(
+        &self,
+        query: RandomFieldsQuery,
+    ) -> Result<FieldNotesResponse, ApiError> {
+        let field_limit = query.n.unwrap_or(3);
+        let mut remaining_notes = query.count.unwrap_or(20);
+        let fields = self.repository.random_fields(field_limit).await?;
+        let mut field_notes = Vec::with_capacity(fields.len());
+
+        for field in fields {
+            let notes = if remaining_notes > 0 {
+                let notes = self
+                    .repository
+                    .list_visible_notes_by_field(&field.id, remaining_notes)
+                    .await?;
+                remaining_notes -= notes.len() as i64;
+                notes
+            } else {
+                Vec::new()
+            };
+            field_notes.push(FieldNotesGroup { field, notes });
+        }
+
+        Ok(FieldNotesResponse { field_notes })
     }
 
     /// Reads a note by reference.

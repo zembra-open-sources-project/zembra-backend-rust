@@ -335,11 +335,47 @@ mod tests {
         content: &str,
         tags: Vec<String>,
     ) -> String {
+        create_note_with_metadata(state, content, None, tags).await
+    }
+
+    /// Creates a note with a field through the notes service.
+    ///
+    /// # Arguments
+    ///
+    /// * `state` - Shared application state.
+    /// * `content` - Note body content.
+    /// * `field` - Field name to associate with the note.
+    ///
+    /// # Returns
+    ///
+    /// Returns the created note ID.
+    async fn create_field_note(state: &super::AppState, content: &str, field: &str) -> String {
+        create_note_with_metadata(state, content, Some(field.to_string()), Vec::new()).await
+    }
+
+    /// Creates a note with optional metadata through the notes service.
+    ///
+    /// # Arguments
+    ///
+    /// * `state` - Shared application state.
+    /// * `content` - Note body content.
+    /// * `field` - Optional field name.
+    /// * `tags` - Tag names to associate with the note.
+    ///
+    /// # Returns
+    ///
+    /// Returns the created note ID.
+    async fn create_note_with_metadata(
+        state: &super::AppState,
+        content: &str,
+        field: Option<String>,
+        tags: Vec<String>,
+    ) -> String {
         let service = crate::services::notes::NotesService::new(state.database.pool.clone());
         service
             .create_note(crate::dto::notes::CreateNoteRequest {
                 content: content.to_string(),
-                field: None,
+                field,
                 tags,
                 role: "Human".to_string(),
                 device_id: None,
@@ -639,6 +675,7 @@ mod tests {
         assert!(body["paths"].get("/notes").is_some());
         assert!(body["paths"].get("/notes/recent").is_some());
         assert!(body["paths"].get("/random/tags").is_some());
+        assert!(body["paths"].get("/random/fields").is_some());
         assert!(body["paths"].get("/notes/batch").is_some());
         assert!(body["paths"].get("/fields").is_some());
         assert!(body["paths"].get("/tags").is_some());
@@ -1012,6 +1049,135 @@ mod tests {
     #[tokio::test]
     async fn random_tags_route_rejects_invalid_n() {
         for uri in ["/random/tags?n=0", "/random/tags?n=21"] {
+            let response = send(Request::builder().uri(uri).body(Body::empty()).unwrap()).await;
+            let status = response.status();
+            let body = response_json(response).await;
+
+            assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+            assert_eq!(body["error"]["code"], "validation_error");
+        }
+    }
+
+    #[tokio::test]
+    async fn random_fields_route_limits_cumulative_notes() {
+        let state = test_state().await;
+        for content in ["first", "second", "third"] {
+            create_field_note(&state, content, "work").await;
+        }
+
+        let response = send_with_state(
+            state,
+            Request::builder()
+                .uri("/random/fields?n=1&count=2")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await;
+        let status = response.status();
+        let body = response_json(response).await;
+        let groups = body["field_notes"].as_array().unwrap();
+        let notes_count = groups
+            .iter()
+            .map(|group| group["notes"].as_array().unwrap().len())
+            .sum::<usize>();
+
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(groups.len(), 1);
+        assert_eq!(notes_count, 2);
+    }
+
+    #[tokio::test]
+    async fn random_fields_route_filters_hidden_notes_and_keeps_empty_fields() {
+        let state = test_state().await;
+        let visible = create_field_note(&state, "visible", "work").await;
+        let archived = create_field_note(&state, "archived", "work").await;
+        let deleted = create_field_note(&state, "deleted", "empty").await;
+        let service = crate::services::notes::NotesService::new(state.database.pool.clone());
+        service.archive_note(&archived).await.unwrap();
+        service.delete_note(&deleted).await.unwrap();
+
+        let response = send_with_state(
+            state,
+            Request::builder()
+                .uri("/random/fields?n=2&count=10")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await;
+        let status = response.status();
+        let body = response_json(response).await;
+        let groups = body["field_notes"].as_array().unwrap();
+        let all_notes = groups
+            .iter()
+            .flat_map(|group| group["notes"].as_array().unwrap())
+            .collect::<Vec<_>>();
+
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(groups.len(), 2);
+        assert!(all_notes.iter().any(|note| note["id"] == visible));
+        assert!(
+            all_notes
+                .iter()
+                .all(|note| { note["content"] != "archived" && note["content"] != "deleted" })
+        );
+        assert!(
+            groups
+                .iter()
+                .any(|group| group["notes"].as_array().unwrap().is_empty())
+        );
+    }
+
+    #[tokio::test]
+    async fn random_fields_route_returns_existing_fields_when_n_is_larger() {
+        let state = test_state().await;
+        create_field_note(&state, "work", "work").await;
+        create_field_note(&state, "life", "life").await;
+
+        let response = send_with_state(
+            state,
+            Request::builder()
+                .uri("/random/fields?n=20&count=20")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await;
+        let status = response.status();
+        let body = response_json(response).await;
+
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(body["field_notes"].as_array().unwrap().len(), 2);
+    }
+
+    #[tokio::test]
+    async fn random_fields_route_uses_default_query_values() {
+        let state = test_state().await;
+        for name in ["alpha", "beta", "gamma", "delta"] {
+            create_field_note(&state, name, name).await;
+        }
+
+        let response = send_with_state(
+            state,
+            Request::builder()
+                .uri("/random/fields")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await;
+        let status = response.status();
+        let body = response_json(response).await;
+
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(body["field_notes"].as_array().unwrap().len(), 3);
+    }
+
+    #[tokio::test]
+    async fn random_fields_route_rejects_invalid_query_values() {
+        for uri in [
+            "/random/fields?n=0",
+            "/random/fields?n=21",
+            "/random/fields?count=0",
+            "/random/fields?count=101",
+        ] {
             let response = send(Request::builder().uri(uri).body(Body::empty()).unwrap()).await;
             let status = response.status();
             let body = response_json(response).await;

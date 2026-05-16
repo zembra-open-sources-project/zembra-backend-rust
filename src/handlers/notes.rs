@@ -5,9 +5,10 @@ use axum::{Json, response::IntoResponse};
 use validator::Validate;
 
 use crate::dto::notes::{
-    BatchCreateNotesRequest, BatchCreateNotesResponse, CreateNoteRequest,
+    BatchCreateNotesRequest, BatchCreateNotesResponse, CreateNoteRequest, FieldNotesResponse,
     ListNoteRevisionsResponse, ListNoteTagsResponse, ListNotesQuery, ListNotesResponse,
-    NoteResponse, RandomTagsQuery, RecentNotesRequest, TaggedNotesResponse, UpdateNoteRequest,
+    NoteResponse, RandomFieldsQuery, RandomTagsQuery, RecentNotesRequest, TaggedNotesResponse,
+    UpdateNoteRequest,
 };
 use crate::error::ApiError;
 use crate::services::notes::NotesService;
@@ -106,6 +107,39 @@ pub async fn random_tagged_notes(
 
     let service = NotesService::new(state.database.pool);
     let response = service.random_tagged_notes(query).await?;
+
+    Ok(Json(response))
+}
+
+/// Lists notes grouped by randomly selected fields.
+///
+/// # Arguments
+///
+/// * `state` - Shared application state.
+/// * `query` - Random fields query parameters.
+///
+/// # Returns
+///
+/// Returns random field groups with their visible notes.
+#[utoipa::path(
+    get,
+    path = "/random/fields",
+    tag = "notes",
+    params(RandomFieldsQuery),
+    responses(
+        (status = 200, description = "Random fields with their visible notes", body = FieldNotesResponse),
+        (status = 422, description = "Validation error", body = crate::dto::error::ErrorResponse),
+        (status = 500, description = "Database error", body = crate::dto::error::ErrorResponse)
+    )
+)]
+pub async fn random_field_notes(
+    State(state): State<crate::app::AppState>,
+    Query(query): Query<RandomFieldsQuery>,
+) -> Result<Json<FieldNotesResponse>, ApiError> {
+    query.validate().map_err(|_| ApiError::Validation)?;
+
+    let service = NotesService::new(state.database.pool);
+    let response = service.random_field_notes(query).await?;
 
     Ok(Json(response))
 }
