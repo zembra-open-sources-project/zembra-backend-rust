@@ -124,3 +124,5 @@
 - 2026-05-15：完成 Stage #3，新增 `docs/references/lan-web-access.md` 普通 Linux 主机局域网部署说明。
 - 2026-05-15：完成 Stage #4，已通过 `cargo fmt --check`、`cargo check`、`cargo test` 和 `cargo clippy -- -D warnings`，其中 `cargo test` 为 54 passed。
 - 2026-05-15：根据本地前端访问反馈修正 CORS 默认策略，空配置下默认只放行 localhost 和 loopback origin，局域网其他机器 origin 仍需显式配置。
+- 2026-05-16：确认 CORS 通配符增量范围，只支持 IPv4 地址段通配，端口精确匹配，域名不支持通配符。
+- 2026-05-16：完成 IPv4 通配符 CORS origin 实现，已通过 `cargo fmt --check`、`cargo check`、`cargo test` 和 `cargo clippy -- -D warnings`，其中 `cargo test` 为 67 passed。

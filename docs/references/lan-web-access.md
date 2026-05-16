@@ -42,7 +42,18 @@ service_role_key = ""
 | `database.path` | SQLite 数据库文件路径，建议使用主机上的持久化目录 |
 | `logging.path` | 日志目录，建议使用主机上的持久化目录 |
 
-后端默认允许本机开发 origin 访问，例如 `http://localhost:5173` 和 `http://127.0.0.1:5173`。如果前端页面运行在局域网其他机器，例如 `http://192.168.1.20:5173`，就把这个完整 origin 加入 `cors_allowed_origins`。
+后端默认允许本机开发 origin 访问，例如 `http://localhost:5173` 和 `http://127.0.0.1:5173`。如果前端页面运行在局域网其他机器，例如 `http://192.168.1.20:5173`，可以把这个完整 origin 加入 `cors_allowed_origins`。
+
+如果局域网前端 IP 会变化，可以在 IPv4 段中使用通配符，端口仍然必须精确匹配：
+
+```toml
+[server]
+host = "0.0.0.0"
+port = 3000
+cors_allowed_origins = ["http://192.168.1.*:5173"]
+```
+
+支持的通配符只限 IPv4 octet，例如 `192.168.1.*`。不支持域名通配符，也不支持端口通配符。
 
 ## 启动前检查
 

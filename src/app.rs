@@ -1,6 +1,6 @@
 use axum::Router;
 use axum::http::{HeaderValue, Method, header::CONTENT_TYPE};
-use std::net::IpAddr;
+use std::net::{IpAddr, Ipv4Addr};
 use tower_http::cors::{AllowOrigin, CorsLayer};
 use utoipa::OpenApi;
 use utoipa_swagger_ui::SwaggerUi;
@@ -40,7 +40,10 @@ pub fn build_router(state: AppState) -> Router {
 /// # Returns
 ///
 /// Returns an Axum router with API routes, Swagger UI, and CORS handling.
-pub fn build_router_with_cors(state: AppState, cors_allowed_origins: Vec<HeaderValue>) -> Router {
+pub fn build_router_with_cors(
+    state: AppState,
+    cors_allowed_origins: Vec<crate::config::CorsOriginRule>,
+) -> Router {
     Router::new()
         .merge(crate::routes::health::router())
         .merge(crate::routes::notes::router())
@@ -63,12 +66,14 @@ pub fn build_router_with_cors(state: AppState, cors_allowed_origins: Vec<HeaderV
 /// # Returns
 ///
 /// Returns a `CorsLayer` that allows configured origins and common API methods.
-fn cors_layer(cors_allowed_origins: Vec<HeaderValue>) -> CorsLayer {
-    let configured_origins = cors_allowed_origins;
+fn cors_layer(cors_allowed_origins: Vec<crate::config::CorsOriginRule>) -> CorsLayer {
+    let configured_origin_rules = cors_allowed_origins;
 
     CorsLayer::new()
         .allow_origin(AllowOrigin::predicate(move |origin, _request_head| {
-            configured_origins.iter().any(|allowed| allowed == origin)
+            configured_origin_rules
+                .iter()
+                .any(|rule| cors_origin_rule_matches(rule, origin))
                 || is_local_browser_origin(origin)
         }))
         .allow_methods([
@@ -80,6 +85,58 @@ fn cors_layer(cors_allowed_origins: Vec<HeaderValue>) -> CorsLayer {
             Method::OPTIONS,
         ])
         .allow_headers([CONTENT_TYPE])
+}
+
+/// Checks whether a configured CORS rule matches a browser origin.
+///
+/// # Arguments
+///
+/// * `rule` - Configured exact or wildcard CORS rule.
+/// * `origin` - Browser `Origin` header value.
+///
+/// # Returns
+///
+/// Returns `true` when the request origin is allowed by the rule.
+fn cors_origin_rule_matches(rule: &crate::config::CorsOriginRule, origin: &HeaderValue) -> bool {
+    match rule {
+        crate::config::CorsOriginRule::Exact(allowed) => allowed == origin,
+        crate::config::CorsOriginRule::Ipv4Wildcard(rule) => {
+            wildcard_cors_origin_matches(rule, origin)
+        }
+    }
+}
+
+/// Checks whether an IPv4 wildcard CORS rule matches a browser origin.
+///
+/// # Arguments
+///
+/// * `rule` - Configured IPv4 wildcard CORS rule.
+/// * `origin` - Browser `Origin` header value.
+///
+/// # Returns
+///
+/// Returns `true` when scheme, exact port, and IPv4 octets match.
+fn wildcard_cors_origin_matches(
+    rule: &crate::config::Ipv4CorsOriginRule,
+    origin: &HeaderValue,
+) -> bool {
+    let Ok(origin) = origin.to_str() else {
+        return false;
+    };
+    let Some(parts) = origin_parts(origin) else {
+        return false;
+    };
+    let Ok(ip) = parts.host.parse::<Ipv4Addr>() else {
+        return false;
+    };
+
+    parts.scheme == rule.scheme
+        && parts.port == Some(rule.port)
+        && rule
+            .octets
+            .iter()
+            .zip(ip.octets())
+            .all(|(expected, actual)| expected.is_none_or(|octet| octet == actual))
 }
 
 /// Checks whether an origin belongs to local development.
@@ -96,22 +153,32 @@ fn is_local_browser_origin(origin: &HeaderValue) -> bool {
         return false;
     };
 
-    let Some(host) = origin_host(origin) else {
+    let Some(parts) = origin_parts(origin) else {
         return false;
     };
 
-    if host.eq_ignore_ascii_case("localhost") {
+    if parts.host.eq_ignore_ascii_case("localhost") {
         return true;
     }
 
-    match host.parse::<IpAddr>() {
+    match parts.host.parse::<IpAddr>() {
         Ok(IpAddr::V4(ip)) => ip.is_loopback(),
         Ok(IpAddr::V6(ip)) => ip.is_loopback(),
         Err(_) => false,
     }
 }
 
-/// Extracts the host portion from a browser origin string.
+/// Browser origin parts used by CORS matching.
+struct OriginParts<'a> {
+    /// URI scheme.
+    scheme: &'a str,
+    /// Host without brackets or port.
+    host: &'a str,
+    /// Numeric port when the origin includes one.
+    port: Option<u16>,
+}
+
+/// Extracts scheme, host, and port from a browser origin string.
 ///
 /// # Arguments
 ///
@@ -119,22 +186,35 @@ fn is_local_browser_origin(origin: &HeaderValue) -> bool {
 ///
 /// # Returns
 ///
-/// Returns the host string when the origin uses HTTP or HTTPS.
-fn origin_host(origin: &str) -> Option<&str> {
-    let authority = origin
+/// Returns parsed parts when the origin uses HTTP or HTTPS.
+fn origin_parts(origin: &str) -> Option<OriginParts<'_>> {
+    let (scheme, authority) = origin
         .strip_prefix("http://")
-        .or_else(|| origin.strip_prefix("https://"))?;
+        .map(|authority| ("http", authority))
+        .or_else(|| {
+            origin
+                .strip_prefix("https://")
+                .map(|authority| ("https", authority))
+        })?;
 
     let authority = authority.split('/').next().unwrap_or(authority);
 
     if authority.starts_with('[') {
-        return authority
-            .strip_prefix('[')?
-            .split_once(']')
-            .map(|(host, _)| host);
+        let (host, rest) = authority.strip_prefix('[')?.split_once(']')?;
+        return Some(OriginParts {
+            scheme,
+            host,
+            port: rest.strip_prefix(':').and_then(|port| port.parse().ok()),
+        });
     }
 
-    Some(authority.split(':').next().unwrap_or(authority))
+    let (host, port) = authority
+        .split_once(':')
+        .map_or((authority, None), |(host, port)| {
+            (host, port.parse::<u16>().ok())
+        });
+
+    Some(OriginParts { scheme, host, port })
 }
 
 #[cfg(test)]
@@ -208,7 +288,7 @@ mod tests {
     /// # Arguments
     ///
     /// * `state` - Shared application state for the router.
-    /// * `cors_allowed_origins` - Browser origins allowed by the router.
+    /// * `cors_allowed_origins` - Browser origin rules allowed by the router.
     /// * `request` - HTTP request to dispatch through the router.
     ///
     /// # Returns
@@ -216,7 +296,7 @@ mod tests {
     /// Returns the HTTP response produced by the router.
     async fn send_with_cors(
         state: super::AppState,
-        cors_allowed_origins: Vec<HeaderValue>,
+        cors_allowed_origins: Vec<crate::config::CorsOriginRule>,
         request: Request<Body>,
     ) -> Response {
         super::build_router_with_cors(state, cors_allowed_origins)
@@ -318,7 +398,7 @@ mod tests {
         let origin = HeaderValue::from_static("http://192.168.1.20:5173");
         let response = send_with_cors(
             test_state().await,
-            vec![origin.clone()],
+            vec![crate::config::CorsOriginRule::Exact(origin.clone())],
             Request::builder()
                 .method(Method::OPTIONS)
                 .uri("/notes")
@@ -407,10 +487,69 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn cors_preflight_allows_configured_ipv4_wildcard_origin() {
+        let origin = HeaderValue::from_static("http://192.168.1.20:5173");
+        let settings = crate::config::ServerSettings {
+            host: "127.0.0.1".to_string(),
+            port: 3000,
+            cors_allowed_origins: vec!["http://192.168.1.*:5173".to_string()],
+        };
+        let response = send_with_cors(
+            test_state().await,
+            settings.cors_origin_rules().unwrap(),
+            Request::builder()
+                .method(Method::OPTIONS)
+                .uri("/notes")
+                .header(ORIGIN, origin.clone())
+                .header(ACCESS_CONTROL_REQUEST_METHOD, "POST")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await;
+
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(
+            response.headers().get(ACCESS_CONTROL_ALLOW_ORIGIN),
+            Some(&origin)
+        );
+    }
+
+    #[tokio::test]
+    async fn cors_preflight_rejects_wildcard_origin_on_different_port() {
+        let settings = crate::config::ServerSettings {
+            host: "127.0.0.1".to_string(),
+            port: 3000,
+            cors_allowed_origins: vec!["http://192.168.1.*:5173".to_string()],
+        };
+        let response = send_with_cors(
+            test_state().await,
+            settings.cors_origin_rules().unwrap(),
+            Request::builder()
+                .method(Method::OPTIONS)
+                .uri("/notes")
+                .header(ORIGIN, "http://192.168.1.20:5174")
+                .header(ACCESS_CONTROL_REQUEST_METHOD, "POST")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await;
+
+        assert_eq!(response.status(), StatusCode::OK);
+        assert!(
+            response
+                .headers()
+                .get(ACCESS_CONTROL_ALLOW_ORIGIN)
+                .is_none()
+        );
+    }
+
+    #[tokio::test]
     async fn cors_preflight_rejects_public_unconfigured_origin() {
         let response = send_with_cors(
             test_state().await,
-            vec![HeaderValue::from_static("http://192.168.1.20:5173")],
+            vec![crate::config::CorsOriginRule::Exact(
+                HeaderValue::from_static("http://192.168.1.20:5173"),
+            )],
             Request::builder()
                 .method(Method::OPTIONS)
                 .uri("/notes")

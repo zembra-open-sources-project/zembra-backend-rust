@@ -1,4 +1,4 @@
-use axum::http::HeaderValue;
+use axum::http::{HeaderValue, Uri};
 use serde::{Deserialize, Serialize};
 use std::net::Ipv4Addr;
 use std::path::{Path, PathBuf};
@@ -30,6 +30,28 @@ pub struct ServerSettings {
     /// Browser origins allowed to access the HTTP API through CORS.
     #[serde(default)]
     pub cors_allowed_origins: Vec<String>,
+}
+
+/// Runtime CORS origin matching rule.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CorsOriginRule {
+    /// Exact browser origin match.
+    Exact(HeaderValue),
+    /// IPv4 origin match that allows wildcard octets.
+    Ipv4Wildcard(Ipv4CorsOriginRule),
+}
+
+/// Runtime CORS IPv4 wildcard matching rule.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Ipv4CorsOriginRule {
+    /// Original origin value echoed when a request matches this rule.
+    pub raw: HeaderValue,
+    /// Required URI scheme.
+    pub scheme: String,
+    /// IPv4 octets where `None` represents a wildcard.
+    pub octets: [Option<u8>; 4],
+    /// Required origin port.
+    pub port: u16,
 }
 
 /// SQLite database connection settings.
@@ -164,26 +186,127 @@ impl ServerSettings {
         })
     }
 
-    /// Parses configured CORS origins into HTTP header values.
+    /// Parses configured CORS origins into runtime matching rules.
     ///
     /// # Returns
     ///
-    /// Returns header values that can be passed to the CORS layer, or a
-    /// configuration error when any configured origin is not a valid header
-    /// value.
-    pub fn cors_origin_values(&self) -> Result<Vec<HeaderValue>, config::ConfigError> {
+    /// Returns exact and IPv4 wildcard CORS rules, or a configuration error when
+    /// a configured wildcard is unsafe or malformed.
+    pub fn cors_origin_rules(&self) -> Result<Vec<CorsOriginRule>, config::ConfigError> {
         self.cors_allowed_origins
             .iter()
-            .map(|origin| {
-                HeaderValue::from_str(origin.trim()).map_err(|_| {
-                    config::ConfigError::Message(format!(
-                        "server.cors_allowed_origins contains an invalid origin: {:?}",
-                        origin
-                    ))
-                })
-            })
+            .map(|origin| parse_cors_origin_rule(origin))
             .collect()
     }
+}
+
+/// Parses a configured CORS origin string into a runtime matching rule.
+///
+/// # Arguments
+///
+/// * `origin` - Configured browser origin.
+///
+/// # Returns
+///
+/// Returns an exact or IPv4 wildcard CORS origin rule.
+fn parse_cors_origin_rule(origin: &str) -> Result<CorsOriginRule, config::ConfigError> {
+    let trimmed = origin.trim();
+    let raw = HeaderValue::from_str(trimmed).map_err(|_| {
+        config::ConfigError::Message(format!(
+            "server.cors_allowed_origins contains an invalid origin: {origin:?}"
+        ))
+    })?;
+
+    if !trimmed.contains('*') {
+        return Ok(CorsOriginRule::Exact(raw));
+    }
+
+    let uri = trimmed.parse::<Uri>().map_err(|_| {
+        config::ConfigError::Message(format!(
+            "server.cors_allowed_origins contains an invalid wildcard origin: {origin:?}"
+        ))
+    })?;
+    let scheme = uri.scheme_str().ok_or_else(|| {
+        config::ConfigError::Message(format!(
+            "wildcard CORS origin must include http or https scheme: {origin:?}"
+        ))
+    })?;
+    if scheme != "http" && scheme != "https" {
+        return Err(config::ConfigError::Message(format!(
+            "wildcard CORS origin must use http or https scheme: {origin:?}"
+        )));
+    }
+
+    let host = uri.host().ok_or_else(|| {
+        config::ConfigError::Message(format!(
+            "wildcard CORS origin must include an IPv4 host: {origin:?}"
+        ))
+    })?;
+    let port = uri.port_u16().ok_or_else(|| {
+        config::ConfigError::Message(format!(
+            "wildcard CORS origin must include an exact numeric port: {origin:?}"
+        ))
+    })?;
+    let octets = parse_ipv4_wildcard_host(host, origin)?;
+
+    Ok(CorsOriginRule::Ipv4Wildcard(Ipv4CorsOriginRule {
+        raw,
+        scheme: scheme.to_string(),
+        octets,
+        port,
+    }))
+}
+
+/// Parses an IPv4 wildcard host.
+///
+/// # Arguments
+///
+/// * `host` - Host portion of a configured CORS origin.
+/// * `origin` - Original configured origin used in error messages.
+///
+/// # Returns
+///
+/// Returns four IPv4 octets where `None` represents `*`.
+fn parse_ipv4_wildcard_host(
+    host: &str,
+    origin: &str,
+) -> Result<[Option<u8>; 4], config::ConfigError> {
+    let parts = host.split('.').collect::<Vec<_>>();
+    if parts.len() != 4 {
+        return Err(config::ConfigError::Message(format!(
+            "wildcard CORS origin only supports IPv4 octet wildcards: {origin:?}"
+        )));
+    }
+
+    let mut has_wildcard = false;
+    let mut octets = [None; 4];
+    for (index, part) in parts.iter().enumerate() {
+        if *part == "*" {
+            has_wildcard = true;
+            octets[index] = None;
+            continue;
+        }
+
+        if part.contains('*') {
+            return Err(config::ConfigError::Message(format!(
+                "wildcard CORS origin only supports full IPv4 octet wildcards: {origin:?}"
+            )));
+        }
+
+        octets[index] = Some(part.parse::<u8>().map_err(|_| {
+            config::ConfigError::Message(format!(
+                "wildcard CORS origin contains an invalid IPv4 octet: {origin:?}"
+            ))
+        })?);
+    }
+
+    if !has_wildcard {
+        return Err(config::ConfigError::Message(format!(
+            "wildcard CORS origin must include at least one IPv4 octet wildcard: {origin:?}"
+        )));
+    }
+
+    Ok(octets)
 }
 
 impl SyncSettings {
@@ -271,9 +394,10 @@ fn default_sync_interval_seconds() -> u64 {
 
 #[cfg(test)]
 mod tests {
-    use axum::http::HeaderValue;
-
-    use super::{DatabaseSettings, ServerSettings, Settings, SyncSettings, sqlite_url_from_path};
+    use super::{
+        CorsOriginRule, DatabaseSettings, ServerSettings, Settings, SyncSettings,
+        sqlite_url_from_path,
+    };
     use std::net::Ipv4Addr;
 
     #[test]
@@ -472,17 +596,44 @@ mod tests {
     }
 
     #[test]
-    fn server_cors_origins_parse_header_values() {
+    fn server_cors_origins_parse_ipv4_wildcard_rules() {
         let settings = ServerSettings {
             host: "127.0.0.1".to_string(),
             port: 3000,
-            cors_allowed_origins: vec!["http://192.168.1.20:5173".to_string()],
+            cors_allowed_origins: vec!["http://192.168.1.*:5173".to_string()],
         };
 
-        assert_eq!(
-            settings.cors_origin_values().unwrap(),
-            vec![HeaderValue::from_static("http://192.168.1.20:5173")]
-        );
+        let rules = settings.cors_origin_rules().unwrap();
+
+        assert!(matches!(
+            &rules[0],
+            CorsOriginRule::Ipv4Wildcard(rule)
+                if rule.scheme == "http"
+                    && rule.octets == [Some(192), Some(168), Some(1), None]
+                    && rule.port == 5173
+        ));
+    }
+
+    #[test]
+    fn server_cors_origins_reject_domain_wildcards() {
+        let settings = ServerSettings {
+            host: "127.0.0.1".to_string(),
+            port: 3000,
+            cors_allowed_origins: vec!["http://*.example.local:5173".to_string()],
+        };
+
+        assert!(settings.cors_origin_rules().is_err());
+    }
+
+    #[test]
+    fn server_cors_origins_reject_port_wildcards() {
+        let settings = ServerSettings {
+            host: "127.0.0.1".to_string(),
+            port: 3000,
+            cors_allowed_origins: vec!["http://192.168.1.*:*".to_string()],
+        };
+
+        assert!(settings.cors_origin_rules().is_err());
     }
 
     #[test]

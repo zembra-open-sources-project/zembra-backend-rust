@@ -34,7 +34,7 @@ async fn main() -> Result<(), error::AppError> {
             sync: sync_service,
             sync_config,
         },
-        settings.server.cors_origin_values()?,
+        settings.server.cors_origin_rules()?,
     );
     let host = settings.server.host_addr()?;
     let addr = SocketAddr::from((host, settings.server.port));

@@ -73,6 +73,7 @@ Out of Scope：
 | --- | --- |
 | `ServerSettings::host_addr()` | 将 `host` 解析成 `Ipv4Addr`，非法值返回配置错误 |
 | `ServerSettings::cors_origins()` | 将配置字符串解析成 HTTP `HeaderValue` 或 `HeaderName` 所需类型，非法 origin 启动失败 |
+| `ServerSettings::cors_origin_rules()` | 将精确 origin 和 IPv4 通配 origin 解析成运行时匹配规则，非法通配符启动失败 |
 
 说明：先保持 IPv4，避免把监听地址、部署文档和测试范围扩成 IPv6。后续如果要支持 IPv6，可以把返回类型扩展为 `IpAddr`。
 
@@ -110,6 +111,24 @@ cors_allowed_origins = ["http://192.168.1.20:5173"]
 | Credentials | 本次不启用 credentials |
 
 暂不采用 `Any` 全放开策略。默认只放行本机开发 origin，局域网其他机器和自定义域名通过配置化白名单补充。
+
+### CORS IPv4 通配符
+
+局域网前端设备 IP 变化时，允许在 IPv4 段中使用 `*` 通配符：
+
+```toml
+cors_allowed_origins = ["http://192.168.1.*:5173"]
+```
+
+通配符规则：
+
+| 项目 | 规则 |
+| --- | --- |
+| 支持位置 | 仅支持 IPv4 host 的完整 octet，例如 `192.168.1.*` |
+| 端口 | 必须精确匹配，例如 `:5173` |
+| 协议 | 必须精确匹配 `http` 或 `https` |
+| 域名 | 不支持域名通配符 |
+| 禁止示例 | `http://*:5173`、`http://192.168.*.*:*`、`http://*.example.local:5173`、`*` |
 
 ### 启动流程
 

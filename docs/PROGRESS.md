@@ -11,3 +11,4 @@
 - [r010] (working tree) : 2026.05.10 完成 Supabase 同步配置 API，新增配置读写服务、运行时 sync 配置热更新、`GET /sync/config`、`PUT /sync/config`、`POST /sync/config/test` 和 OpenAPI 注册；配置写回 `~/.zembra.env`，响应不返回 service role key 明文，已通过 cargo fmt --check、cargo check、cargo test 和 cargo clippy -- -D warnings 验证，等待用户验收。
 - [r011] (working tree) : 2026.05.15 完成局域网网页访问后端服务支持，`server.host` 改为标准 IPv4 字符串配置，新增 `server.cors_allowed_origins` 和 Axum CORS layer，补充普通 Linux 主机局域网部署说明；已通过 cargo fmt --check、cargo check、cargo test 和 cargo clippy -- -D warnings 验证，等待用户验收。
 - [r011-fix] (working tree) : 2026.05.15 修正 CORS 默认策略，空配置下默认只允许 localhost 和 loopback origin，解决 `cargo run` 后本机前端默认无法跨域访问后端的问题；局域网其他机器、公网或自定义域名 origin 仍需通过 `server.cors_allowed_origins` 显式配置。
+- [r011-wildcard] (working tree) : 2026.05.16 完成 CORS 局域网 IPv4 通配符配置，支持 `http://192.168.1.*:5173` 这类 IPv4 octet 通配并保持端口精确匹配，拒绝域名通配符和端口通配符；已通过 cargo fmt --check、cargo check、cargo test 和 cargo clippy -- -D warnings 验证。
