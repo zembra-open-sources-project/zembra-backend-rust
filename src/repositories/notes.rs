@@ -5,6 +5,7 @@ use sqlx::{FromRow, Sqlite, SqlitePool, Transaction};
 use crate::error::ApiError;
 use crate::models::field::FieldRecord;
 use crate::models::note::NoteRecord;
+use crate::models::note_link::NoteLinkRecord;
 use crate::models::revision::NoteRevisionRecord;
 use crate::models::tag::TagRecord;
 use crate::repositories::sync::{SyncChangeInput, record_sync_change_in_transaction};
@@ -26,6 +27,8 @@ pub struct CreateNoteInput {
     pub role: String,
     /// Optional device identifier for the initial revision.
     pub device_id: Option<String>,
+    /// Normalized outgoing note links parsed by the client.
+    pub links: Vec<NoteLinkInput>,
 }
 
 /// Result returned after note creation.
@@ -37,6 +40,8 @@ pub struct CreatedNote {
     pub field: Option<String>,
     /// Resolved tag names.
     pub tags: Vec<String>,
+    /// Persisted outgoing note links.
+    pub links: Vec<NoteLinkRecord>,
 }
 
 /// Input data used to update a note.
@@ -50,6 +55,19 @@ pub struct UpdateNoteInput {
     pub field: Option<String>,
     /// Optional normalized replacement tags; absent keeps current tags.
     pub tags: Option<Vec<String>>,
+    /// Optional normalized replacement links; absent keeps current links.
+    pub links: Option<Vec<NoteLinkInput>>,
+}
+
+/// Input data used to create or replace a note link.
+#[derive(Debug, Clone)]
+pub struct NoteLinkInput {
+    /// Target note full ID or unique prefix.
+    pub target_note_ref: String,
+    /// Optional link text parsed by the client.
+    pub anchor_text: Option<String>,
+    /// Optional zero-based position parsed by the client.
+    pub position: Option<i64>,
 }
 
 /// Aggregated note count for one local calendar date.
@@ -137,7 +155,7 @@ impl NotesRepository {
 
         sqlx::query_as::<_, NoteRecord>(
             "SELECT id, content, role, field_id, created_at, updated_at, archived_at, deleted_at, current_revision_id \
-             FROM notes WHERE workspace_id = ? AND deleted_at IS NULL ORDER BY updated_at DESC LIMIT ?",
+             FROM notes WHERE workspace_id = ? AND deleted_at IS NULL AND archived_at IS NULL ORDER BY updated_at DESC LIMIT ?",
         )
         .bind(DEFAULT_WORKSPACE_ID)
         .bind(limit)
@@ -381,7 +399,7 @@ impl NotesRepository {
         })
     }
 
-    /// Resolves a note by full ID or unique hexadecimal prefix.
+    /// Resolves a visible note by full ID or unique hexadecimal prefix.
     ///
     /// # Arguments
     ///
@@ -389,14 +407,14 @@ impl NotesRepository {
     ///
     /// # Returns
     ///
-    /// Returns the matching note or a note reference error.
+    /// Returns the matching non-deleted and non-archived note or a note reference error.
     pub async fn get_note_by_ref(&self, note_ref: &str) -> Result<NoteRecord, ApiError> {
         validate_note_ref(note_ref)?;
 
         let pattern = format!("{note_ref}%");
         let notes = sqlx::query_as::<_, NoteRecord>(
             "SELECT id, content, role, field_id, created_at, updated_at, archived_at, deleted_at, current_revision_id \
-             FROM notes WHERE workspace_id = ? AND id LIKE ? AND deleted_at IS NULL ORDER BY id ASC LIMIT 2",
+             FROM notes WHERE workspace_id = ? AND id LIKE ? AND deleted_at IS NULL AND archived_at IS NULL ORDER BY id ASC LIMIT 2",
         )
         .bind(DEFAULT_WORKSPACE_ID)
         .bind(pattern)
@@ -477,6 +495,9 @@ impl NotesRepository {
 
         if let Some(tags) = input.tags.as_deref() {
             replace_note_tags_in_transaction(&mut transaction, &note.id, tags).await?;
+        }
+        if let Some(links) = input.links.as_deref() {
+            replace_note_links_in_transaction(&mut transaction, &note.id, links).await?;
         }
 
         let updated = select_note_by_id(&mut transaction, &note.id).await?;
@@ -632,13 +653,112 @@ impl NotesRepository {
     pub async fn list_note_tags(&self, note_ref: &str) -> Result<Vec<TagRecord>, ApiError> {
         let note = self.get_note_by_ref(note_ref).await?;
 
+        self.list_note_tags_by_id(&note.id).await
+    }
+
+    /// Lists tags associated with a note ID.
+    ///
+    /// # Arguments
+    ///
+    /// * `note_id` - Exact note identifier.
+    ///
+    /// # Returns
+    ///
+    /// Returns tag records ordered by name.
+    pub async fn list_note_tags_by_id(&self, note_id: &str) -> Result<Vec<TagRecord>, ApiError> {
         sqlx::query_as::<_, TagRecord>(
             "SELECT tags.id, tags.name, tags.created_at \
              FROM tags INNER JOIN note_tags ON tags.workspace_id = note_tags.workspace_id AND tags.id = note_tags.tag_id \
              WHERE note_tags.workspace_id = ? AND note_tags.note_id = ? ORDER BY tags.name ASC",
         )
         .bind(DEFAULT_WORKSPACE_ID)
-        .bind(note.id)
+        .bind(note_id)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(ApiError::from)
+    }
+
+    /// Reads a field name by exact field ID.
+    ///
+    /// # Arguments
+    ///
+    /// * `field_id` - Optional exact field identifier.
+    ///
+    /// # Returns
+    ///
+    /// Returns the field name when the note has a field.
+    pub async fn field_name_by_id(
+        &self,
+        field_id: Option<&str>,
+    ) -> Result<Option<String>, ApiError> {
+        match field_id {
+            Some(field_id) => sqlx::query_scalar::<_, String>(
+                "SELECT name FROM fields WHERE workspace_id = ? AND id = ?",
+            )
+            .bind(DEFAULT_WORKSPACE_ID)
+            .bind(field_id)
+            .fetch_optional(&self.pool)
+            .await
+            .map_err(ApiError::from),
+            None => Ok(None),
+        }
+    }
+
+    /// Lists visible outgoing links for a note.
+    ///
+    /// # Arguments
+    ///
+    /// * `note_id` - Exact note identifier.
+    ///
+    /// # Returns
+    ///
+    /// Returns links whose target notes are non-deleted and non-archived.
+    pub async fn list_visible_outgoing_links(
+        &self,
+        note_id: &str,
+    ) -> Result<Vec<NoteLinkRecord>, ApiError> {
+        sqlx::query_as::<_, NoteLinkRecord>(
+            "SELECT note_links.id, note_links.source_note_id, note_links.target_note_id, note_links.anchor_text, note_links.position, note_links.created_at \
+             FROM note_links \
+             INNER JOIN notes target ON note_links.workspace_id = target.workspace_id AND note_links.target_note_id = target.id \
+             WHERE note_links.workspace_id = ? \
+             AND note_links.source_note_id = ? \
+             AND target.deleted_at IS NULL \
+             AND target.archived_at IS NULL \
+             ORDER BY note_links.position ASC, note_links.created_at ASC, note_links.id ASC",
+        )
+        .bind(DEFAULT_WORKSPACE_ID)
+        .bind(note_id)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(ApiError::from)
+    }
+
+    /// Lists visible backlinks for a note.
+    ///
+    /// # Arguments
+    ///
+    /// * `note_id` - Exact note identifier.
+    ///
+    /// # Returns
+    ///
+    /// Returns links whose source notes are non-deleted and non-archived.
+    pub async fn list_visible_backlinks(
+        &self,
+        note_id: &str,
+    ) -> Result<Vec<NoteLinkRecord>, ApiError> {
+        sqlx::query_as::<_, NoteLinkRecord>(
+            "SELECT note_links.id, note_links.source_note_id, note_links.target_note_id, note_links.anchor_text, note_links.position, note_links.created_at \
+             FROM note_links \
+             INNER JOIN notes source ON note_links.workspace_id = source.workspace_id AND note_links.source_note_id = source.id \
+             WHERE note_links.workspace_id = ? \
+             AND note_links.target_note_id = ? \
+             AND source.deleted_at IS NULL \
+             AND source.archived_at IS NULL \
+             ORDER BY note_links.created_at ASC, note_links.id ASC",
+        )
+        .bind(DEFAULT_WORKSPACE_ID)
+        .bind(note_id)
         .fetch_all(&self.pool)
         .await
         .map_err(ApiError::from)
@@ -823,6 +943,7 @@ async fn create_note_in_transaction(
         resolved_tags.push(tag.name);
     }
 
+    let links = insert_note_links_in_transaction(transaction, &note_id, &input.links).await?;
     let note = select_note_by_id(transaction, &note_id).await?;
     record_sync_change_in_transaction(
         transaction,
@@ -862,7 +983,117 @@ async fn create_note_in_transaction(
         note,
         field: field.map(|field| field.name),
         tags: resolved_tags,
+        links,
     })
+}
+
+/// Inserts outgoing note links inside an existing transaction.
+///
+/// # Arguments
+///
+/// * `transaction` - Open SQLite transaction.
+/// * `source_note_id` - Exact source note identifier.
+/// * `links` - Normalized link inputs.
+///
+/// # Returns
+///
+/// Returns persisted link records.
+async fn insert_note_links_in_transaction(
+    transaction: &mut Transaction<'_, Sqlite>,
+    source_note_id: &str,
+    links: &[NoteLinkInput],
+) -> Result<Vec<NoteLinkRecord>, ApiError> {
+    let mut created = Vec::with_capacity(links.len());
+
+    for link in links {
+        let target =
+            resolve_visible_note_by_ref_in_transaction(transaction, &link.target_note_ref).await?;
+        if target.id == source_note_id {
+            return Err(ApiError::Validation);
+        }
+
+        let link_id = new_id();
+        sqlx::query(
+            "INSERT INTO note_links \
+             (id, workspace_id, source_note_id, target_note_id, anchor_text, position, created_at) \
+             VALUES (?, ?, ?, ?, ?, ?, unixepoch())",
+        )
+        .bind(&link_id)
+        .bind(DEFAULT_WORKSPACE_ID)
+        .bind(source_note_id)
+        .bind(&target.id)
+        .bind(link.anchor_text.as_deref())
+        .bind(link.position)
+        .execute(&mut **transaction)
+        .await?;
+
+        let record = select_note_link_by_id(transaction, &link_id).await?;
+        record_sync_change_in_transaction(
+            transaction,
+            SyncChangeInput {
+                entity_type: "note_link",
+                entity_id: record.id.clone(),
+                operation: "attach",
+                base_revision_id: None,
+                new_revision_id: None,
+                payload: note_link_payload(&record),
+            },
+        )
+        .await?;
+        created.push(record);
+    }
+
+    Ok(created)
+}
+
+/// Replaces outgoing note links inside an existing transaction.
+///
+/// # Arguments
+///
+/// * `transaction` - Open SQLite transaction.
+/// * `source_note_id` - Exact source note identifier.
+/// * `links` - Normalized final links for the source note.
+///
+/// # Returns
+///
+/// Returns `Ok(())` after link associations and sync changes are updated.
+async fn replace_note_links_in_transaction(
+    transaction: &mut Transaction<'_, Sqlite>,
+    source_note_id: &str,
+    links: &[NoteLinkInput],
+) -> Result<(), ApiError> {
+    let current_links = sqlx::query_as::<_, NoteLinkRecord>(
+        "SELECT id, source_note_id, target_note_id, anchor_text, position, created_at \
+         FROM note_links WHERE workspace_id = ? AND source_note_id = ?",
+    )
+    .bind(DEFAULT_WORKSPACE_ID)
+    .bind(source_note_id)
+    .fetch_all(&mut **transaction)
+    .await?;
+
+    for link in current_links {
+        sqlx::query("DELETE FROM note_links WHERE workspace_id = ? AND id = ?")
+            .bind(DEFAULT_WORKSPACE_ID)
+            .bind(&link.id)
+            .execute(&mut **transaction)
+            .await?;
+        record_sync_change_in_transaction(
+            transaction,
+            SyncChangeInput {
+                entity_type: "note_link",
+                entity_id: link.id.clone(),
+                operation: "detach",
+                base_revision_id: None,
+                new_revision_id: None,
+                payload: note_link_payload(&link),
+            },
+        )
+        .await?;
+    }
+
+    insert_note_links_in_transaction(transaction, source_note_id, links).await?;
+
+    Ok(())
 }
 
 /// Replaces all tag associations for a note inside an existing transaction.
@@ -981,6 +1212,67 @@ async fn select_note_by_id(
     .await
 }
 
+/// Selects a note link by exact ID inside a transaction.
+///
+/// # Arguments
+///
+/// * `transaction` - Open SQLite transaction.
+/// * `link_id` - Exact link identifier.
+///
+/// # Returns
+///
+/// Returns the matching note link record.
+async fn select_note_link_by_id(
+    transaction: &mut Transaction<'_, Sqlite>,
+    link_id: &str,
+) -> Result<NoteLinkRecord, sqlx::Error> {
+    sqlx::query_as::<_, NoteLinkRecord>(
+        "SELECT id, source_note_id, target_note_id, anchor_text, position, created_at \
+         FROM note_links WHERE workspace_id = ? AND id = ?",
+    )
+    .bind(DEFAULT_WORKSPACE_ID)
+    .bind(link_id)
+    .fetch_one(&mut **transaction)
+    .await
+}
+
+/// Resolves a visible note by full ID or unique prefix inside a transaction.
+///
+/// # Arguments
+///
+/// * `transaction` - Open SQLite transaction.
+/// * `note_ref` - Full note ID or unique prefix.
+///
+/// # Returns
+///
+/// Returns the matching non-deleted and non-archived note.
+async fn resolve_visible_note_by_ref_in_transaction(
+    transaction: &mut Transaction<'_, Sqlite>,
+    note_ref: &str,
+) -> Result<NoteRecord, ApiError> {
+    validate_note_ref(note_ref)?;
+
+    let pattern = format!("{note_ref}%");
+    let notes = sqlx::query_as::<_, NoteRecord>(
+        "SELECT id, content, role, field_id, created_at, updated_at, archived_at, deleted_at, current_revision_id \
+         FROM notes WHERE workspace_id = ? AND id LIKE ? AND deleted_at IS NULL AND archived_at IS NULL ORDER BY id ASC LIMIT 2",
+    )
+    .bind(DEFAULT_WORKSPACE_ID)
+    .bind(pattern)
+    .fetch_all(&mut **transaction)
+    .await?;
+
+    match notes.as_slice() {
+        [note] => Ok(note.clone()),
+        [] => Err(ApiError::RecordNotFound(format!(
+            "Note reference \"{note_ref}\" did not match any visible note."
+        ))),
+        _ => Err(ApiError::AmbiguousNoteReference(format!(
+            "Note reference \"{note_ref}\" matched multiple visible notes."
+        ))),
+    }
+}
+
 /// Builds a sync payload for a note record.
 ///
 /// # Arguments
@@ -1037,6 +1329,27 @@ fn note_tag_payload(note_id: &str, tag_id: &str) -> serde_json::Value {
     })
 }
 
+/// Builds a sync payload for a note link relation.
+///
+/// # Arguments
+///
+/// * `link` - Persisted note link record.
+///
+/// # Returns
+///
+/// Returns a JSON payload for the relation change.
+fn note_link_payload(link: &NoteLinkRecord) -> serde_json::Value {
+    serde_json::json!({
+        "id": link.id,
+        "workspace_id": DEFAULT_WORKSPACE_ID,
+        "source_note_id": link.source_note_id,
+        "target_note_id": link.target_note_id,
+        "anchor_text": link.anchor_text,
+        "position": link.position,
+        "created_at": link.created_at
+    })
+}
+
 /// Validates a note reference before SQL lookup.
 ///
 /// # Arguments
@@ -1087,7 +1400,7 @@ fn validate_full_note_uuid(note_uuid: &str) -> Result<(), ApiError> {
 
 #[cfg(test)]
 mod tests {
-    use super::{CreateNoteInput, NotesRepository, UpdateNoteInput};
+    use super::{CreateNoteInput, NoteLinkInput, NotesRepository, UpdateNoteInput};
     use crate::error::ApiError;
     use crate::repositories::database::Database;
     use crate::repositories::sync::list_sync_changes;
@@ -1140,6 +1453,7 @@ mod tests {
             tags: vec!["rust".to_string(), "sqlite".to_string()],
             role: "Human".to_string(),
             device_id: None,
+            links: Vec::new(),
         }
     }
 
@@ -1214,6 +1528,7 @@ mod tests {
                 tags: Vec::new(),
                 role: "Robot".to_string(),
                 device_id: None,
+                links: Vec::new(),
             },
         ];
 
@@ -1237,6 +1552,7 @@ mod tests {
                     device_id: None,
                     field: None,
                     tags: None,
+                    links: None,
                 },
             )
             .await
@@ -1265,6 +1581,7 @@ mod tests {
                     device_id: None,
                     field: Some("personal".to_string()),
                     tags: Some(vec!["api".to_string(), "sqlite".to_string()]),
+                    links: None,
                 },
             )
             .await
@@ -1301,6 +1618,7 @@ mod tests {
                     device_id: None,
                     field: None,
                     tags: None,
+                    links: None,
                 },
             )
             .await
@@ -1330,6 +1648,7 @@ mod tests {
                     device_id: None,
                     field: None,
                     tags: Some(Vec::new()),
+                    links: None,
                 },
             )
             .await
@@ -1340,9 +1659,199 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn create_note_writes_outgoing_links() {
+        let repository = notes_repository().await;
+        let target = repository.create_note(input("target")).await.unwrap();
+        let mut source_input = input("source");
+        source_input.links = vec![NoteLinkInput {
+            target_note_ref: target.note.id[..8].to_string(),
+            anchor_text: Some("target note".to_string()),
+            position: Some(7),
+        }];
+
+        let created = repository.create_note(source_input).await.unwrap();
+        let outgoing = repository
+            .list_visible_outgoing_links(&created.note.id)
+            .await
+            .unwrap();
+        let backlinks = repository
+            .list_visible_backlinks(&target.note.id)
+            .await
+            .unwrap();
+
+        assert_eq!(created.links.len(), 1);
+        assert_eq!(outgoing.len(), 1);
+        assert_eq!(backlinks.len(), 1);
+        assert_eq!(outgoing[0].source_note_id, created.note.id);
+        assert_eq!(outgoing[0].target_note_id, target.note.id);
+        assert_eq!(outgoing[0].anchor_text.as_deref(), Some("target note"));
+        assert_eq!(outgoing[0].position, Some(7));
+    }
+
+    #[tokio::test]
+    async fn update_note_replaces_and_clears_outgoing_links() {
+        let repository = notes_repository().await;
+        let first = repository.create_note(input("first target")).await.unwrap();
+        let second = repository
+            .create_note(input("second target"))
+            .await
+            .unwrap();
+        let mut source_input = input("source");
+        source_input.links = vec![NoteLinkInput {
+            target_note_ref: first.note.id.clone(),
+            anchor_text: Some("first".to_string()),
+            position: Some(1),
+        }];
+        let source = repository.create_note(source_input).await.unwrap();
+
+        repository
+            .update_note(
+                &source.note.id,
+                UpdateNoteInput {
+                    content: "new".to_string(),
+                    device_id: None,
+                    field: None,
+                    tags: None,
+                    links: Some(vec![NoteLinkInput {
+                        target_note_ref: second.note.id.clone(),
+                        anchor_text: Some("second".to_string()),
+                        position: Some(2),
+                    }]),
+                },
+            )
+            .await
+            .unwrap();
+        let outgoing = repository
+            .list_visible_outgoing_links(&source.note.id)
+            .await
+            .unwrap();
+
+        assert_eq!(outgoing.len(), 1);
+        assert_eq!(outgoing[0].target_note_id, second.note.id);
+
+        repository
+            .update_note(
+                &source.note.id,
+                UpdateNoteInput {
+                    content: "clear".to_string(),
+                    device_id: None,
+                    field: None,
+                    tags: None,
+                    links: Some(Vec::new()),
+                },
+            )
+            .await
+            .unwrap();
+        let outgoing = repository
+            .list_visible_outgoing_links(&source.note.id)
+            .await
+            .unwrap();
+
+        assert!(outgoing.is_empty());
+    }
+
+    #[tokio::test]
+    async fn update_note_keeps_links_when_absent() {
+        let repository = notes_repository().await;
+        let target = repository.create_note(input("target")).await.unwrap();
+        let mut source_input = input("source");
+        source_input.links = vec![NoteLinkInput {
+            target_note_ref: target.note.id.clone(),
+            anchor_text: None,
+            position: None,
+        }];
+        let source = repository.create_note(source_input).await.unwrap();
+
+        repository
+            .update_note(
+                &source.note.id,
+                UpdateNoteInput {
+                    content: "new".to_string(),
+                    device_id: None,
+                    field: None,
+                    tags: None,
+                    links: None,
+                },
+            )
+            .await
+            .unwrap();
+        let outgoing = repository
+            .list_visible_outgoing_links(&source.note.id)
+            .await
+            .unwrap();
+
+        assert_eq!(outgoing.len(), 1);
+        assert_eq!(outgoing[0].target_note_id, target.note.id);
+    }
+
+    #[tokio::test]
+    async fn note_links_reject_hidden_and_self_targets() {
+        let repository = notes_repository().await;
+        let archived = repository.create_note(input("archived")).await.unwrap();
+        repository.archive_note(&archived.note.id).await.unwrap();
+        let deleted = repository.create_note(input("deleted")).await.unwrap();
+        repository.delete_note(&deleted.note.id).await.unwrap();
+        let source = repository.create_note(input("source")).await.unwrap();
+
+        let archived_result = repository
+            .update_note(
+                &source.note.id,
+                UpdateNoteInput {
+                    content: "archived".to_string(),
+                    device_id: None,
+                    field: None,
+                    tags: None,
+                    links: Some(vec![NoteLinkInput {
+                        target_note_ref: archived.note.id,
+                        anchor_text: None,
+                        position: None,
+                    }]),
+                },
+            )
+            .await;
+        let deleted_result = repository
+            .update_note(
+                &source.note.id,
+                UpdateNoteInput {
+                    content: "deleted".to_string(),
+                    device_id: None,
+                    field: None,
+                    tags: None,
+                    links: Some(vec![NoteLinkInput {
+                        target_note_ref: deleted.note.id,
+                        anchor_text: None,
+                        position: None,
+                    }]),
+                },
+            )
+            .await;
+        let self_result = repository
+            .update_note(
+                &source.note.id,
+                UpdateNoteInput {
+                    content: "self".to_string(),
+                    device_id: None,
+                    field: None,
+                    tags: None,
+                    links: Some(vec![NoteLinkInput {
+                        target_note_ref: source.note.id.clone(),
+                        anchor_text: None,
+                        position: None,
+                    }]),
+                },
+            )
+            .await;
+
+        assert!(matches!(archived_result, Err(ApiError::RecordNotFound(_))));
+        assert!(matches!(deleted_result, Err(ApiError::RecordNotFound(_))));
+        assert!(matches!(self_result, Err(ApiError::Validation)));
+    }
+
+    #[tokio::test]
     async fn update_archive_and_delete_record_note_sync_changes() {
         let repository = notes_repository().await;
         let created = repository.create_note(input("old")).await.unwrap();
+        let deleted_note = repository.create_note(input("delete me")).await.unwrap();
 
         repository
             .update_note(
@@ -1352,12 +1861,13 @@ mod tests {
                     device_id: None,
                     field: None,
                     tags: None,
+                    links: None,
                 },
             )
             .await
             .unwrap();
         repository.archive_note(&created.note.id).await.unwrap();
-        repository.delete_note(&created.note.id).await.unwrap();
+        repository.delete_note(&deleted_note.note.id).await.unwrap();
         let changes = list_sync_changes(&repository.pool).await.unwrap();
 
         assert!(changes.iter().any(|change| {

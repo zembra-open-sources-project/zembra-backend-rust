@@ -4,5 +4,6 @@
 
 pub mod field;
 pub mod note;
+pub mod note_link;
 pub mod revision;
 pub mod tag;

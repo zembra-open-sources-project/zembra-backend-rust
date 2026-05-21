@@ -45,6 +45,7 @@ use utoipa::OpenApi;
             crate::dto::notes::ListNoteRevisionsResponse,
             crate::dto::notes::ListNoteTagsResponse,
             crate::dto::notes::ListNotesResponse,
+            crate::dto::notes::NoteLinkRequest,
             crate::dto::notes::NoteMetadata,
             crate::dto::notes::NoteResponse,
             crate::dto::notes::RecentNotesRequest,
@@ -63,6 +64,7 @@ use utoipa::OpenApi;
             crate::dto::taxonomy::ListTagsResponse,
             crate::handlers::health::HealthResponse,
             crate::models::field::FieldRecord,
+            crate::models::note_link::NoteLinkRecord,
             crate::models::note::NoteRecord,
             crate::models::revision::NoteRevisionRecord,
             crate::models::tag::TagRecord

@@ -13,7 +13,9 @@ use crate::error::ApiError;
 use crate::models::note::NoteRecord;
 use crate::models::revision::NoteRevisionRecord;
 use crate::models::tag::TagRecord;
-use crate::repositories::notes::{CreateNoteInput, CreatedNote, NotesRepository, UpdateNoteInput};
+use crate::repositories::notes::{
+    CreateNoteInput, CreatedNote, NoteLinkInput, NotesRepository, UpdateNoteInput,
+};
 
 const DEFAULT_UPDATE_FIELD: &str = "inbox";
 const DAILY_NOTE_COUNT_DAYS: i64 = 30;
@@ -54,7 +56,7 @@ impl NotesService {
         let input = normalize_create_request(request)?;
         let created = self.repository.create_note(input).await?;
 
-        Ok(created_note_to_response(created))
+        self.created_note_to_response(created).await
     }
 
     /// Creates notes in a single transaction.
@@ -78,11 +80,13 @@ impl NotesService {
             .repository
             .create_notes_batch(inputs)
             .await?
-            .into_iter()
-            .map(created_note_to_response)
-            .collect();
+            .into_iter();
+        let mut responses = Vec::new();
+        for created in notes {
+            responses.push(self.created_note_to_response(created).await?);
+        }
 
-        Ok(BatchCreateNotesResponse { notes })
+        Ok(BatchCreateNotesResponse { notes: responses })
     }
 
     /// Lists active notes.
@@ -254,8 +258,9 @@ impl NotesService {
     /// # Returns
     ///
     /// Returns the matching note.
-    pub async fn get_note(&self, note_ref: &str) -> Result<NoteRecord, ApiError> {
-        self.repository.get_note_by_ref(note_ref).await
+    pub async fn get_note(&self, note_ref: &str) -> Result<NoteResponse, ApiError> {
+        let note = self.repository.get_note_by_ref(note_ref).await?;
+        self.note_to_response(note).await
     }
 
     /// Updates note content.
@@ -272,9 +277,10 @@ impl NotesService {
         &self,
         note_ref: &str,
         request: UpdateNoteRequest,
-    ) -> Result<NoteRecord, ApiError> {
+    ) -> Result<NoteResponse, ApiError> {
         let input = normalize_update_request(request)?;
-        self.repository.update_note(note_ref, input).await
+        let note = self.repository.update_note(note_ref, input).await?;
+        self.note_to_response(note).await
     }
 
     /// Archives a note.
@@ -371,6 +377,75 @@ impl NotesService {
             .remove_tag_from_note(note_ref, &tag_name)
             .await
     }
+
+    /// Converts a repository creation result into an API response.
+    ///
+    /// # Arguments
+    ///
+    /// * `created` - Repository creation result.
+    ///
+    /// # Returns
+    ///
+    /// Returns API note response with link metadata.
+    async fn created_note_to_response(
+        &self,
+        created: CreatedNote,
+    ) -> Result<NoteResponse, ApiError> {
+        let backlinks = self
+            .repository
+            .list_visible_backlinks(&created.note.id)
+            .await?;
+
+        Ok(NoteResponse {
+            metadata: NoteMetadata {
+                field: created.field,
+                tags: created.tags,
+                role: created.note.role.clone(),
+                outgoing_links: created.links,
+                backlinks,
+            },
+            note: created.note,
+        })
+    }
+
+    /// Converts a note record into an API response.
+    ///
+    /// # Arguments
+    ///
+    /// * `note` - Persisted note record.
+    ///
+    /// # Returns
+    ///
+    /// Returns API note response with resolved metadata.
+    async fn note_to_response(&self, note: NoteRecord) -> Result<NoteResponse, ApiError> {
+        let field = self
+            .repository
+            .field_name_by_id(note.field_id.as_deref())
+            .await?;
+        let tags = self
+            .repository
+            .list_note_tags_by_id(&note.id)
+            .await?
+            .into_iter()
+            .map(|tag| tag.name)
+            .collect();
+        let outgoing_links = self
+            .repository
+            .list_visible_outgoing_links(&note.id)
+            .await?;
+        let backlinks = self.repository.list_visible_backlinks(&note.id).await?;
+
+        Ok(NoteResponse {
+            metadata: NoteMetadata {
+                field,
+                tags,
+                role: note.role.clone(),
+                outgoing_links,
+                backlinks,
+            },
+            note,
+        })
+    }
 }
 
 /// Normalizes a create-note request into repository input.
@@ -391,6 +466,7 @@ fn normalize_create_request(request: CreateNoteRequest) -> Result<CreateNoteInpu
         .map(normalize_required_text)
         .transpose()?;
     let tags = normalize_tags(request.tags);
+    let links = normalize_links(request.links)?;
 
     Ok(CreateNoteInput {
         content,
@@ -398,6 +474,7 @@ fn normalize_create_request(request: CreateNoteRequest) -> Result<CreateNoteInpu
         tags,
         role,
         device_id: request.device_id,
+        links,
     })
 }
 
@@ -420,33 +497,15 @@ fn normalize_update_request(request: UpdateNoteRequest) -> Result<UpdateNoteInpu
         })
         .transpose()?;
     let tags = request.tags.map(normalize_tags);
+    let links = request.links.map(normalize_links).transpose()?;
 
     Ok(UpdateNoteInput {
         content,
         device_id: request.device_id,
         field,
         tags,
+        links,
     })
-}
-
-/// Converts a repository creation result into an API response.
-///
-/// # Arguments
-///
-/// * `created` - Repository creation result.
-///
-/// # Returns
-///
-/// Returns API note response.
-fn created_note_to_response(created: CreatedNote) -> NoteResponse {
-    NoteResponse {
-        metadata: NoteMetadata {
-            field: created.field,
-            tags: created.tags,
-            role: created.note.role.clone(),
-        },
-        note: created.note,
-    }
 }
 
 /// Normalizes a required text field.
@@ -502,6 +561,36 @@ fn normalize_tags(tags: Vec<String>) -> Vec<String> {
     }
 
     normalized
+}
+
+/// Normalizes client-parsed note links.
+///
+/// # Arguments
+///
+/// * `links` - Raw link request values.
+///
+/// # Returns
+///
+/// Returns normalized link inputs.
+fn normalize_links(
+    links: Vec<crate::dto::notes::NoteLinkRequest>,
+) -> Result<Vec<NoteLinkInput>, ApiError> {
+    links
+        .into_iter()
+        .map(|link| {
+            let target_note_ref = normalize_required_text(&link.target_note_ref)?;
+            let anchor_text = link
+                .anchor_text
+                .map(|anchor_text| anchor_text.trim().to_string())
+                .filter(|anchor_text| !anchor_text.is_empty());
+
+            Ok(NoteLinkInput {
+                target_note_ref,
+                anchor_text,
+                position: link.position,
+            })
+        })
+        .collect()
 }
 
 /// Converts a local date into a Unix timestamp at local start of day.

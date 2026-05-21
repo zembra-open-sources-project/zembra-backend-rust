@@ -283,7 +283,7 @@ pub async fn create_notes_batch(
 ///
 /// # Returns
 ///
-/// Returns the matching note.
+/// Returns the matching note with metadata.
 #[utoipa::path(
     get,
     path = "/notes/{note_ref}",
@@ -292,7 +292,7 @@ pub async fn create_notes_batch(
         ("note_ref" = String, Path, description = "Full 32-character note ID or at least 4-character hex prefix")
     ),
     responses(
-        (status = 200, description = "Matching note", body = crate::models::note::NoteRecord),
+        (status = 200, description = "Matching note", body = NoteResponse),
         (status = 404, description = "Note not found", body = crate::dto::error::ErrorResponse),
         (status = 409, description = "Ambiguous note reference", body = crate::dto::error::ErrorResponse),
         (status = 422, description = "Invalid note reference", body = crate::dto::error::ErrorResponse),
@@ -319,7 +319,7 @@ pub async fn get_note(
 ///
 /// # Returns
 ///
-/// Returns the updated note.
+/// Returns the updated note with metadata.
 #[utoipa::path(
     patch,
     path = "/notes/{note_ref}",
@@ -329,7 +329,7 @@ pub async fn get_note(
     ),
     request_body = UpdateNoteRequest,
     responses(
-        (status = 200, description = "Updated note", body = crate::models::note::NoteRecord),
+        (status = 200, description = "Updated note", body = NoteResponse),
         (status = 400, description = "Invalid JSON", body = crate::dto::error::ErrorResponse),
         (status = 404, description = "Note not found", body = crate::dto::error::ErrorResponse),
         (status = 409, description = "Ambiguous note reference", body = crate::dto::error::ErrorResponse),

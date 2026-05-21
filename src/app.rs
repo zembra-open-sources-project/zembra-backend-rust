@@ -379,6 +379,7 @@ mod tests {
                 tags,
                 role: "Human".to_string(),
                 device_id: None,
+                links: Vec::new(),
             })
             .await
             .unwrap()
@@ -676,6 +677,89 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn note_routes_return_link_metadata() {
+        let state = test_state().await;
+        let target_id = create_note(&state, "target").await;
+
+        let create_response = send_with_state(
+            state.clone(),
+            Request::builder()
+                .method("POST")
+                .uri("/notes")
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    json!({
+                        "content": "source",
+                        "role": "Human",
+                        "links": [{
+                            "target_note_ref": target_id,
+                            "anchor_text": "target",
+                            "position": 2
+                        }]
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await;
+        let status = create_response.status();
+        let body = response_json(create_response).await;
+        let source_id = body["note"]["id"].as_str().unwrap().to_string();
+
+        assert_eq!(status, StatusCode::CREATED);
+        assert_eq!(
+            body["metadata"]["outgoing_links"].as_array().unwrap().len(),
+            1
+        );
+        assert_eq!(
+            body["metadata"]["outgoing_links"][0]["target_note_id"],
+            json!(target_id)
+        );
+
+        let get_response = send_with_state(
+            state.clone(),
+            Request::builder()
+                .method("GET")
+                .uri(format!("/notes/{target_id}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await;
+        let body = response_json(get_response).await;
+
+        assert_eq!(body["metadata"]["backlinks"].as_array().unwrap().len(), 1);
+        assert_eq!(
+            body["metadata"]["backlinks"][0]["source_note_id"],
+            json!(source_id)
+        );
+
+        let patch_response = send_with_state(
+            state,
+            Request::builder()
+                .method("PATCH")
+                .uri(format!("/notes/{source_id}"))
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    json!({
+                        "content": "source without links",
+                        "links": []
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await;
+        let body = response_json(patch_response).await;
+
+        assert!(
+            body["metadata"]["outgoing_links"]
+                .as_array()
+                .unwrap()
+                .is_empty()
+        );
+    }
+
+    #[tokio::test]
     async fn patch_note_updates_content_field_and_tags() {
         let state = test_state().await;
         let note_id = create_note_with_metadata(
@@ -713,13 +797,13 @@ mod tests {
             "SELECT name FROM fields WHERE workspace_id = ? AND id = ?",
         )
         .bind(crate::repositories::taxonomy::DEFAULT_WORKSPACE_ID)
-        .bind(body["field_id"].as_str().unwrap())
+        .bind(body["note"]["field_id"].as_str().unwrap())
         .fetch_one(&state.database.pool)
         .await
         .unwrap();
 
         assert_eq!(status, StatusCode::OK);
-        assert_eq!(body["content"], "new");
+        assert_eq!(body["note"]["content"], "new");
         assert_eq!(field_name, "personal");
         assert_eq!(
             tags.iter().map(|tag| tag.name.as_str()).collect::<Vec<_>>(),
@@ -758,13 +842,13 @@ mod tests {
             "SELECT name FROM fields WHERE workspace_id = ? AND id = ?",
         )
         .bind(crate::repositories::taxonomy::DEFAULT_WORKSPACE_ID)
-        .bind(body["field_id"].as_str().unwrap())
+        .bind(body["note"]["field_id"].as_str().unwrap())
         .fetch_one(&state.database.pool)
         .await
         .unwrap();
 
         assert_eq!(status, StatusCode::OK);
-        assert_eq!(body["content"], "new");
+        assert_eq!(body["note"]["content"], "new");
         assert_eq!(field_name, "work");
         assert_eq!(
             tags.iter().map(|tag| tag.name.as_str()).collect::<Vec<_>>(),
@@ -799,7 +883,7 @@ mod tests {
             "SELECT name FROM fields WHERE workspace_id = ? AND id = ?",
         )
         .bind(crate::repositories::taxonomy::DEFAULT_WORKSPACE_ID)
-        .bind(body["field_id"].as_str().unwrap())
+        .bind(body["note"]["field_id"].as_str().unwrap())
         .fetch_one(&state.database.pool)
         .await
         .unwrap();
@@ -873,6 +957,26 @@ mod tests {
         assert!(
             body["components"]["schemas"]["UpdateNoteRequest"]["properties"]
                 .get("tags")
+                .is_some()
+        );
+        assert!(
+            body["components"]["schemas"]["CreateNoteRequest"]["properties"]
+                .get("links")
+                .is_some()
+        );
+        assert!(
+            body["components"]["schemas"]["UpdateNoteRequest"]["properties"]
+                .get("links")
+                .is_some()
+        );
+        assert!(
+            body["components"]["schemas"]["NoteMetadata"]["properties"]
+                .get("outgoing_links")
+                .is_some()
+        );
+        assert!(
+            body["components"]["schemas"]["NoteMetadata"]["properties"]
+                .get("backlinks")
                 .is_some()
         );
     }

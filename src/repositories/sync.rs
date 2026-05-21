@@ -603,6 +603,31 @@ async fn apply_remote_change_in_transaction(
             .await
             .map_err(|error| error.to_string())?;
         }
+        ("note_link", "attach") => {
+            sqlx::query(
+                "INSERT OR IGNORE INTO note_links \
+                 (id, workspace_id, source_note_id, target_note_id, anchor_text, position, created_at) \
+                 VALUES (?, ?, ?, ?, ?, ?, COALESCE(?, unixepoch()))",
+            )
+            .bind(required_text(payload, "id")?)
+            .bind(DEFAULT_WORKSPACE_ID)
+            .bind(required_text(payload, "source_note_id")?)
+            .bind(required_text(payload, "target_note_id")?)
+            .bind(optional_text(payload, "anchor_text"))
+            .bind(optional_i64(payload, "position"))
+            .bind(optional_i64(payload, "created_at"))
+            .execute(&mut **transaction)
+            .await
+            .map_err(|error| error.to_string())?;
+        }
+        ("note_link", "detach") => {
+            sqlx::query("DELETE FROM note_links WHERE workspace_id = ? AND id = ?")
+                .bind(DEFAULT_WORKSPACE_ID)
+                .bind(required_text(payload, "id")?)
+                .execute(&mut **transaction)
+                .await
+                .map_err(|error| error.to_string())?;
+        }
         _ => {
             return Err(format!(
                 "unsupported remote change {} {}",
@@ -883,6 +908,89 @@ mod tests {
         .unwrap();
 
         assert_eq!(current_revision_id, "revision-2");
+    }
+
+    #[tokio::test]
+    async fn apply_remote_note_link_attach_and_detach() {
+        let database = Database::connect("sqlite://:memory:").await.unwrap();
+        let repository = SyncRepository::new(database.pool.clone());
+        let source = remote_change(
+            "remote-source-note-change",
+            "note",
+            "source-note",
+            "insert",
+            serde_json::json!({
+                "id": "source-note",
+                "content": "source",
+                "role": "Human",
+                "field_id": null,
+                "created_at": 100,
+                "updated_at": 100,
+                "archived_at": null,
+                "deleted_at": null,
+                "current_revision_id": null
+            }),
+        );
+        let target = remote_change(
+            "remote-target-note-change",
+            "note",
+            "target-note",
+            "insert",
+            serde_json::json!({
+                "id": "target-note",
+                "content": "target",
+                "role": "Human",
+                "field_id": null,
+                "created_at": 100,
+                "updated_at": 100,
+                "archived_at": null,
+                "deleted_at": null,
+                "current_revision_id": null
+            }),
+        );
+        let attach = remote_change(
+            "remote-link-attach",
+            "note_link",
+            "link-1",
+            "attach",
+            serde_json::json!({
+                "id": "link-1",
+                "source_note_id": "source-note",
+                "target_note_id": "target-note",
+                "anchor_text": "target",
+                "position": 3,
+                "created_at": 101
+            }),
+        );
+        let detach = remote_change(
+            "remote-link-detach",
+            "note_link",
+            "link-1",
+            "detach",
+            serde_json::json!({
+                "id": "link-1"
+            }),
+        );
+
+        repository
+            .apply_remote_changes(&[source, target, attach])
+            .await
+            .unwrap();
+        let attached =
+            sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM note_links WHERE id = 'link-1'")
+                .fetch_one(&database.pool)
+                .await
+                .unwrap();
+
+        repository.apply_remote_changes(&[detach]).await.unwrap();
+        let detached =
+            sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM note_links WHERE id = 'link-1'")
+                .fetch_one(&database.pool)
+                .await
+                .unwrap();
+
+        assert_eq!(attached, 1);
+        assert_eq!(detached, 0);
     }
 }
 

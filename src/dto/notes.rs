@@ -4,6 +4,7 @@ use validator::Validate;
 
 use crate::models::field::FieldRecord;
 use crate::models::note::NoteRecord;
+use crate::models::note_link::NoteLinkRecord;
 use crate::models::revision::NoteRevisionRecord;
 use crate::models::tag::TagRecord;
 
@@ -71,6 +72,10 @@ pub struct CreateNoteRequest {
     pub role: String,
     /// Optional device identifier for the initial revision.
     pub device_id: Option<String>,
+    /// Client-parsed outgoing note links.
+    #[serde(default)]
+    #[validate(nested)]
+    pub links: Vec<NoteLinkRequest>,
 }
 
 /// Request body for batch note creation.
@@ -175,6 +180,23 @@ pub struct NoteMetadata {
     pub tags: Vec<String>,
     /// Role that created the note.
     pub role: String,
+    /// Links from this note to other visible notes.
+    pub outgoing_links: Vec<NoteLinkRecord>,
+    /// Links from other visible notes to this note.
+    pub backlinks: Vec<NoteLinkRecord>,
+}
+
+/// Client-parsed outgoing link for note create and update requests.
+#[derive(Debug, Clone, Deserialize, Validate, ToSchema)]
+pub struct NoteLinkRequest {
+    /// Target note full ID or unique hexadecimal prefix.
+    #[validate(length(min = 4), custom(function = "validate_hex_note_uuid"))]
+    pub target_note_ref: String,
+    /// Optional link text parsed by the client.
+    pub anchor_text: Option<String>,
+    /// Optional zero-based position parsed by the client.
+    #[validate(range(min = 0))]
+    pub position: Option<i64>,
 }
 
 /// Request body for updating a note.
@@ -190,6 +212,9 @@ pub struct UpdateNoteRequest {
     pub field: Option<Option<String>>,
     /// Optional replacement tag list; absent keeps current tags.
     pub tags: Option<Vec<String>>,
+    /// Optional replacement outgoing links; absent keeps current links.
+    #[validate(nested)]
+    pub links: Option<Vec<NoteLinkRequest>>,
 }
 
 /// Returns the default note role for create requests.
