@@ -402,6 +402,23 @@ mod tests {
             .unwrap();
     }
 
+    /// Updates a note creation timestamp directly for deterministic statistics tests.
+    ///
+    /// # Arguments
+    ///
+    /// * `state` - Shared application state.
+    /// * `note_id` - Note ID to update.
+    /// * `created_at` - Timestamp value to write.
+    async fn set_created_at(state: &super::AppState, note_id: &str, created_at: i64) {
+        sqlx::query("UPDATE notes SET created_at = ?, updated_at = ? WHERE id = ?")
+            .bind(created_at)
+            .bind(created_at)
+            .bind(note_id)
+            .execute(&state.database.pool)
+            .await
+            .unwrap();
+    }
+
     /// Reads a response body as JSON.
     ///
     /// # Arguments
@@ -835,6 +852,7 @@ mod tests {
         assert!(body["paths"].get("/health").is_some());
         assert!(body["paths"].get("/notes").is_some());
         assert!(body["paths"].get("/notes/recent").is_some());
+        assert!(body["paths"].get("/notes/stats/daily-counts").is_some());
         assert!(body["paths"].get("/random/notes").is_some());
         assert!(body["paths"].get("/random/tags").is_some());
         assert!(body["paths"].get("/random/fields").is_some());
@@ -1118,6 +1136,62 @@ mod tests {
 
         assert_eq!(status, StatusCode::NOT_FOUND);
         assert_eq!(body["error"]["code"], "record_not_found");
+    }
+
+    #[tokio::test]
+    async fn daily_note_counts_route_returns_thirty_local_days_with_counts() {
+        use chrono::{Duration, Local, TimeZone};
+
+        let state = test_state().await;
+        let today = Local::now().date_naive();
+        let yesterday = today - Duration::days(1);
+        let today_timestamp = Local
+            .from_local_datetime(&today.and_hms_opt(12, 0, 0).unwrap())
+            .single()
+            .unwrap()
+            .timestamp();
+        let yesterday_timestamp = Local
+            .from_local_datetime(&yesterday.and_hms_opt(12, 0, 0).unwrap())
+            .single()
+            .unwrap()
+            .timestamp();
+        let first_today = create_note(&state, "today 1").await;
+        let second_today = create_note(&state, "today 2").await;
+        let archived_today = create_note(&state, "archived today").await;
+        let deleted_yesterday = create_note(&state, "deleted yesterday").await;
+        let visible_yesterday = create_note(&state, "visible yesterday").await;
+
+        set_created_at(&state, &first_today, today_timestamp).await;
+        set_created_at(&state, &second_today, today_timestamp).await;
+        set_created_at(&state, &archived_today, today_timestamp).await;
+        set_created_at(&state, &deleted_yesterday, yesterday_timestamp).await;
+        set_created_at(&state, &visible_yesterday, yesterday_timestamp).await;
+
+        let service = crate::services::notes::NotesService::new(state.database.pool.clone());
+        service.archive_note(&archived_today).await.unwrap();
+        service.delete_note(&deleted_yesterday).await.unwrap();
+
+        let response = send_with_state(
+            state,
+            Request::builder()
+                .uri("/notes/stats/daily-counts")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await;
+        let status = response.status();
+        let body = response_json(response).await;
+        let days = body["days"].as_array().unwrap();
+        let today_key = today.format("%Y-%m-%d").to_string();
+        let yesterday_key = yesterday.format("%Y-%m-%d").to_string();
+
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(days.len(), 30);
+        assert_eq!(days.last().unwrap()["date"], today_key);
+        assert_eq!(days.last().unwrap()["count"], 2);
+        assert_eq!(days[28]["date"], yesterday_key);
+        assert_eq!(days[28]["count"], 1);
+        assert!(days.iter().take(28).all(|day| day["count"] == 0));
     }
 
     #[tokio::test]

@@ -14,6 +14,10 @@ pub fn router() -> Router<crate::app::AppState> {
         )
         .route("/notes/recent", post(crate::handlers::notes::recent_notes))
         .route(
+            "/notes/stats/daily-counts",
+            get(crate::handlers::notes::daily_note_counts),
+        )
+        .route(
             "/random/tags",
             get(crate::handlers::notes::random_tagged_notes),
         )

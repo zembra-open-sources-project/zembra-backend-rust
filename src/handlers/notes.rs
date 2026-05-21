@@ -5,10 +5,10 @@ use axum::{Json, response::IntoResponse};
 use validator::Validate;
 
 use crate::dto::notes::{
-    BatchCreateNotesRequest, BatchCreateNotesResponse, CreateNoteRequest, FieldNotesResponse,
-    ListNoteRevisionsResponse, ListNoteTagsResponse, ListNotesQuery, ListNotesResponse,
-    NoteResponse, RandomFieldsQuery, RandomNotesQuery, RandomTagsQuery, RecentNotesRequest,
-    TaggedNotesResponse, UpdateNoteRequest,
+    BatchCreateNotesRequest, BatchCreateNotesResponse, CreateNoteRequest, DailyNoteCountsResponse,
+    FieldNotesResponse, ListNoteRevisionsResponse, ListNoteTagsResponse, ListNotesQuery,
+    ListNotesResponse, NoteResponse, RandomFieldsQuery, RandomNotesQuery, RandomTagsQuery,
+    RecentNotesRequest, TaggedNotesResponse, UpdateNoteRequest,
 };
 use crate::error::ApiError;
 use crate::services::notes::NotesService;
@@ -76,6 +76,33 @@ pub async fn recent_notes(
     let notes = service.recent_notes(request).await?;
 
     Ok(Json(ListNotesResponse { notes }))
+}
+
+/// Counts notes created per day over the past 30 days.
+///
+/// # Arguments
+///
+/// * `state` - Shared application state.
+///
+/// # Returns
+///
+/// Returns daily visible note counts ordered by date ascending.
+#[utoipa::path(
+    get,
+    path = "/notes/stats/daily-counts",
+    tag = "notes",
+    responses(
+        (status = 200, description = "Daily visible note counts for the past 30 days", body = DailyNoteCountsResponse),
+        (status = 500, description = "Database error", body = crate::dto::error::ErrorResponse)
+    )
+)]
+pub async fn daily_note_counts(
+    State(state): State<crate::app::AppState>,
+) -> Result<Json<DailyNoteCountsResponse>, ApiError> {
+    let service = NotesService::new(state.database.pool);
+    let response = service.daily_note_counts().await?;
+
+    Ok(Json(response))
 }
 
 /// Lists random visible notes.

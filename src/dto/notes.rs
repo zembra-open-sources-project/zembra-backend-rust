@@ -104,6 +104,22 @@ pub struct ListNotesResponse {
     pub notes: Vec<NoteRecord>,
 }
 
+/// Response body for daily note count statistics.
+#[derive(Debug, Clone, Serialize, ToSchema)]
+pub struct DailyNoteCountsResponse {
+    /// Daily note count buckets ordered by date ascending.
+    pub days: Vec<DailyNoteCount>,
+}
+
+/// Note count for a server-local calendar date.
+#[derive(Debug, Clone, Serialize, ToSchema)]
+pub struct DailyNoteCount {
+    /// Server-local date in `YYYY-MM-DD` format.
+    pub date: String,
+    /// Number of visible notes created on the date.
+    pub count: i64,
+}
+
 /// Response body for random tagged notes.
 #[derive(Debug, Clone, Serialize, ToSchema)]
 pub struct TaggedNotesResponse {

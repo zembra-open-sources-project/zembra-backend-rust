@@ -1,9 +1,13 @@
+use std::collections::HashMap;
+
+use chrono::{Duration, Local, NaiveDate, TimeZone};
 use sqlx::SqlitePool;
 
 use crate::dto::notes::{
-    BatchCreateNotesResponse, CreateNoteRequest, FieldNotesGroup, FieldNotesResponse, NoteMetadata,
-    NoteResponse, RandomFieldsQuery, RandomNotesQuery, RandomTagsQuery, RecentNotesRequest,
-    TaggedNotesGroup, TaggedNotesResponse, UpdateNoteRequest,
+    BatchCreateNotesResponse, CreateNoteRequest, DailyNoteCount, DailyNoteCountsResponse,
+    FieldNotesGroup, FieldNotesResponse, NoteMetadata, NoteResponse, RandomFieldsQuery,
+    RandomNotesQuery, RandomTagsQuery, RecentNotesRequest, TaggedNotesGroup, TaggedNotesResponse,
+    UpdateNoteRequest,
 };
 use crate::error::ApiError;
 use crate::models::note::NoteRecord;
@@ -12,6 +16,7 @@ use crate::models::tag::TagRecord;
 use crate::repositories::notes::{CreateNoteInput, CreatedNote, NotesRepository, UpdateNoteInput};
 
 const DEFAULT_UPDATE_FIELD: &str = "inbox";
+const DAILY_NOTE_COUNT_DAYS: i64 = 30;
 
 /// Service for note business workflows.
 #[derive(Debug, Clone)]
@@ -123,6 +128,51 @@ impl NotesService {
     /// Returns random non-deleted and non-archived note records.
     pub async fn random_notes(&self, query: RandomNotesQuery) -> Result<Vec<NoteRecord>, ApiError> {
         self.repository.list_random_notes(query.n).await
+    }
+
+    /// Counts visible notes created per server-local day for the past 30 days.
+    ///
+    /// # Returns
+    ///
+    /// Returns a fixed 30-day series ordered by date ascending.
+    pub async fn daily_note_counts(&self) -> Result<DailyNoteCountsResponse, ApiError> {
+        self.daily_note_counts_for_today(Local::now().date_naive())
+            .await
+    }
+
+    /// Counts visible notes created per local day ending at a supplied date.
+    ///
+    /// # Arguments
+    ///
+    /// * `today` - Server-local date to use as the final bucket.
+    ///
+    /// # Returns
+    ///
+    /// Returns a fixed 30-day series ordered by date ascending.
+    async fn daily_note_counts_for_today(
+        &self,
+        today: NaiveDate,
+    ) -> Result<DailyNoteCountsResponse, ApiError> {
+        let start_date = today - Duration::days(DAILY_NOTE_COUNT_DAYS - 1);
+        let start_timestamp = local_start_of_day_timestamp(start_date);
+        let counts_by_date: HashMap<_, _> = self
+            .repository
+            .daily_note_counts_since(start_timestamp)
+            .await?
+            .into_iter()
+            .map(|row| (row.date, row.count))
+            .collect();
+        let days = (0..DAILY_NOTE_COUNT_DAYS)
+            .map(|offset| {
+                let date = start_date + Duration::days(offset);
+                let date = date.format("%Y-%m-%d").to_string();
+                let count = counts_by_date.get(&date).copied().unwrap_or(0);
+
+                DailyNoteCount { date, count }
+            })
+            .collect();
+
+        Ok(DailyNoteCountsResponse { days })
     }
 
     /// Lists notes grouped by randomly selected tags.
@@ -452,4 +502,27 @@ fn normalize_tags(tags: Vec<String>) -> Vec<String> {
     }
 
     normalized
+}
+
+/// Converts a local date into a Unix timestamp at local start of day.
+///
+/// # Arguments
+///
+/// * `date` - Server-local calendar date.
+///
+/// # Returns
+///
+/// Returns the Unix timestamp for local midnight.
+fn local_start_of_day_timestamp(date: NaiveDate) -> i64 {
+    let midnight = date
+        .and_hms_opt(0, 0, 0)
+        .expect("valid local midnight components");
+
+    Local
+        .from_local_datetime(&midnight)
+        .single()
+        .or_else(|| Local.from_local_datetime(&midnight).earliest())
+        .or_else(|| Local.from_local_datetime(&midnight).latest())
+        .expect("local date has a representable midnight")
+        .timestamp()
 }

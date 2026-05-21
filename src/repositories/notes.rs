@@ -1,6 +1,6 @@
 use std::collections::HashSet;
 
-use sqlx::{Sqlite, SqlitePool, Transaction};
+use sqlx::{FromRow, Sqlite, SqlitePool, Transaction};
 
 use crate::error::ApiError;
 use crate::models::field::FieldRecord;
@@ -50,6 +50,15 @@ pub struct UpdateNoteInput {
     pub field: Option<String>,
     /// Optional normalized replacement tags; absent keeps current tags.
     pub tags: Option<Vec<String>>,
+}
+
+/// Aggregated note count for one local calendar date.
+#[derive(Debug, Clone, FromRow)]
+pub struct DailyNoteCountRow {
+    /// Server-local date in `YYYY-MM-DD` format.
+    pub date: String,
+    /// Number of visible notes created on the date.
+    pub count: i64,
 }
 
 /// Repository for note data access.
@@ -207,6 +216,36 @@ impl NotesRepository {
         )
         .bind(DEFAULT_WORKSPACE_ID)
         .bind(limit)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(ApiError::from)
+    }
+
+    /// Lists visible note counts grouped by server-local creation date.
+    ///
+    /// # Arguments
+    ///
+    /// * `start_timestamp` - Inclusive Unix timestamp for the first local day.
+    ///
+    /// # Returns
+    ///
+    /// Returns note counts grouped by `YYYY-MM-DD` local date.
+    pub async fn daily_note_counts_since(
+        &self,
+        start_timestamp: i64,
+    ) -> Result<Vec<DailyNoteCountRow>, ApiError> {
+        sqlx::query_as::<_, DailyNoteCountRow>(
+            "SELECT date(created_at, 'unixepoch', 'localtime') AS date, COUNT(*) AS count \
+             FROM notes \
+             WHERE workspace_id = ? \
+             AND deleted_at IS NULL \
+             AND archived_at IS NULL \
+             AND created_at >= ? \
+             GROUP BY date \
+             ORDER BY date ASC",
+        )
+        .bind(DEFAULT_WORKSPACE_ID)
+        .bind(start_timestamp)
         .fetch_all(&self.pool)
         .await
         .map_err(ApiError::from)
