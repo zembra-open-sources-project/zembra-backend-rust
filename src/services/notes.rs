@@ -9,7 +9,9 @@ use crate::error::ApiError;
 use crate::models::note::NoteRecord;
 use crate::models::revision::NoteRevisionRecord;
 use crate::models::tag::TagRecord;
-use crate::repositories::notes::{CreateNoteInput, CreatedNote, NotesRepository};
+use crate::repositories::notes::{CreateNoteInput, CreatedNote, NotesRepository, UpdateNoteInput};
+
+const DEFAULT_UPDATE_FIELD: &str = "inbox";
 
 /// Service for note business workflows.
 #[derive(Debug, Clone)]
@@ -221,10 +223,8 @@ impl NotesService {
         note_ref: &str,
         request: UpdateNoteRequest,
     ) -> Result<NoteRecord, ApiError> {
-        let content = normalize_required_text(&request.content)?;
-        self.repository
-            .update_note_content(note_ref, &content, request.device_id.as_deref())
-            .await
+        let input = normalize_update_request(request)?;
+        self.repository.update_note(note_ref, input).await
     }
 
     /// Archives a note.
@@ -348,6 +348,34 @@ fn normalize_create_request(request: CreateNoteRequest) -> Result<CreateNoteInpu
         tags,
         role,
         device_id: request.device_id,
+    })
+}
+
+/// Normalizes an update-note request into repository input.
+///
+/// # Arguments
+///
+/// * `request` - Update-note request.
+///
+/// # Returns
+///
+/// Returns normalized repository input.
+fn normalize_update_request(request: UpdateNoteRequest) -> Result<UpdateNoteInput, ApiError> {
+    let content = normalize_required_text(&request.content)?;
+    let field = request
+        .field
+        .map(|field| match field {
+            Some(field) => normalize_required_text(&field),
+            None => Ok(DEFAULT_UPDATE_FIELD.to_string()),
+        })
+        .transpose()?;
+    let tags = request.tags.map(normalize_tags);
+
+    Ok(UpdateNoteInput {
+        content,
+        device_id: request.device_id,
+        field,
+        tags,
     })
 }
 

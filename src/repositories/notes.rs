@@ -1,3 +1,5 @@
+use std::collections::HashSet;
+
 use sqlx::{Sqlite, SqlitePool, Transaction};
 
 use crate::error::ApiError;
@@ -35,6 +37,19 @@ pub struct CreatedNote {
     pub field: Option<String>,
     /// Resolved tag names.
     pub tags: Vec<String>,
+}
+
+/// Input data used to update a note.
+#[derive(Debug, Clone)]
+pub struct UpdateNoteInput {
+    /// New note body content.
+    pub content: String,
+    /// Optional device identifier for the update revision.
+    pub device_id: Option<String>,
+    /// Optional normalized field name; absent keeps the current field.
+    pub field: Option<String>,
+    /// Optional normalized replacement tags; absent keeps current tags.
+    pub tags: Option<Vec<String>>,
 }
 
 /// Repository for note data access.
@@ -360,26 +375,28 @@ impl NotesRepository {
         }
     }
 
-    /// Updates note content and creates a new current revision.
+    /// Updates note content, optional field, and optional tag associations.
     ///
     /// # Arguments
     ///
     /// * `note_ref` - Full note ID or unique prefix.
-    /// * `content` - New note content.
-    /// * `device_id` - Optional device identifier.
+    /// * `input` - Normalized update input.
     ///
     /// # Returns
     ///
     /// Returns the updated note record.
-    pub async fn update_note_content(
+    pub async fn update_note(
         &self,
         note_ref: &str,
-        content: &str,
-        device_id: Option<&str>,
+        input: UpdateNoteInput,
     ) -> Result<NoteRecord, ApiError> {
         let note = self.get_note_by_ref(note_ref).await?;
         let mut transaction = self.pool.begin().await?;
         let revision_id = new_id();
+        let field = match input.field.as_deref() {
+            Some(field) => Some(get_or_create_field_in_transaction(&mut transaction, field).await?),
+            None => None,
+        };
 
         sqlx::query(
             "INSERT INTO note_revisions (id, workspace_id, note_id, content, title, device_id, created_at) \
@@ -388,20 +405,40 @@ impl NotesRepository {
         .bind(&revision_id)
         .bind(DEFAULT_WORKSPACE_ID)
         .bind(&note.id)
-        .bind(content)
-        .bind(device_id)
+        .bind(&input.content)
+        .bind(input.device_id.as_deref())
         .execute(&mut *transaction)
         .await?;
 
-        sqlx::query(
-            "UPDATE notes SET content = ?, updated_at = unixepoch(), current_revision_id = ? WHERE workspace_id = ? AND id = ?",
-        )
-        .bind(content)
-        .bind(&revision_id)
-        .bind(DEFAULT_WORKSPACE_ID)
-        .bind(&note.id)
-        .execute(&mut *transaction)
-        .await?;
+        match &field {
+            Some(field) => {
+                sqlx::query(
+                    "UPDATE notes SET content = ?, field_id = ?, updated_at = unixepoch(), current_revision_id = ? WHERE workspace_id = ? AND id = ?",
+                )
+                .bind(&input.content)
+                .bind(&field.id)
+                .bind(&revision_id)
+                .bind(DEFAULT_WORKSPACE_ID)
+                .bind(&note.id)
+                .execute(&mut *transaction)
+                .await?;
+            }
+            None => {
+                sqlx::query(
+                    "UPDATE notes SET content = ?, updated_at = unixepoch(), current_revision_id = ? WHERE workspace_id = ? AND id = ?",
+                )
+                .bind(&input.content)
+                .bind(&revision_id)
+                .bind(DEFAULT_WORKSPACE_ID)
+                .bind(&note.id)
+                .execute(&mut *transaction)
+                .await?;
+            }
+        }
+
+        if let Some(tags) = input.tags.as_deref() {
+            replace_note_tags_in_transaction(&mut transaction, &note.id, tags).await?;
+        }
 
         let updated = select_note_by_id(&mut transaction, &note.id).await?;
         record_sync_change_in_transaction(
@@ -416,9 +453,9 @@ impl NotesRepository {
                     "id": revision_id,
                     "workspace_id": DEFAULT_WORKSPACE_ID,
                     "note_id": note.id,
-                    "content": content,
+                    "content": input.content,
                     "title": null,
-                    "device_id": device_id,
+                    "device_id": input.device_id,
                     "created_at": updated.updated_at,
                     "base_revision_id": note.current_revision_id
                 }),
@@ -789,6 +826,98 @@ async fn create_note_in_transaction(
     })
 }
 
+/// Replaces all tag associations for a note inside an existing transaction.
+///
+/// # Arguments
+///
+/// * `transaction` - Open SQLite transaction.
+/// * `note_id` - Exact note identifier.
+/// * `tag_names` - Normalized final tag names for the note.
+///
+/// # Returns
+///
+/// Returns `Ok(())` after tag associations and sync changes are updated.
+async fn replace_note_tags_in_transaction(
+    transaction: &mut Transaction<'_, Sqlite>,
+    note_id: &str,
+    tag_names: &[String],
+) -> Result<(), ApiError> {
+    let current_tags = sqlx::query_as::<_, TagRecord>(
+        "SELECT tags.id, tags.name, tags.created_at \
+         FROM tags INNER JOIN note_tags ON tags.workspace_id = note_tags.workspace_id AND tags.id = note_tags.tag_id \
+         WHERE note_tags.workspace_id = ? AND note_tags.note_id = ?",
+    )
+    .bind(DEFAULT_WORKSPACE_ID)
+    .bind(note_id)
+    .fetch_all(&mut **transaction)
+    .await?;
+    let current_ids = current_tags
+        .iter()
+        .map(|tag| tag.id.clone())
+        .collect::<HashSet<_>>();
+
+    let mut target_tags = Vec::with_capacity(tag_names.len());
+    for tag_name in tag_names {
+        target_tags.push(get_or_create_tag_in_transaction(transaction, tag_name).await?);
+    }
+    let target_ids = target_tags
+        .iter()
+        .map(|tag| tag.id.clone())
+        .collect::<HashSet<_>>();
+
+    for tag in &target_tags {
+        if !current_ids.contains(&tag.id) {
+            sqlx::query(
+                "INSERT OR IGNORE INTO note_tags (workspace_id, note_id, tag_id, created_at) VALUES (?, ?, ?, unixepoch())",
+            )
+            .bind(DEFAULT_WORKSPACE_ID)
+            .bind(note_id)
+            .bind(&tag.id)
+            .execute(&mut **transaction)
+            .await?;
+            record_sync_change_in_transaction(
+                transaction,
+                SyncChangeInput {
+                    entity_type: "note_tag",
+                    entity_id: note_tag_entity_id(note_id, &tag.id),
+                    operation: "attach",
+                    base_revision_id: None,
+                    new_revision_id: None,
+                    payload: note_tag_payload(note_id, &tag.id),
+                },
+            )
+            .await?;
+        }
+    }
+
+    for tag in &current_tags {
+        if !target_ids.contains(&tag.id) {
+            sqlx::query(
+                "DELETE FROM note_tags WHERE workspace_id = ? AND note_id = ? AND tag_id = ?",
+            )
+            .bind(DEFAULT_WORKSPACE_ID)
+            .bind(note_id)
+            .bind(&tag.id)
+            .execute(&mut **transaction)
+            .await?;
+            record_sync_change_in_transaction(
+                transaction,
+                SyncChangeInput {
+                    entity_type: "note_tag",
+                    entity_id: note_tag_entity_id(note_id, &tag.id),
+                    operation: "detach",
+                    base_revision_id: None,
+                    new_revision_id: None,
+                    payload: note_tag_payload(note_id, &tag.id),
+                },
+            )
+            .await?;
+        }
+    }
+
+    Ok(())
+}
+
 /// Selects a note by exact ID inside a transaction.
 ///
 /// # Arguments
@@ -919,7 +1048,7 @@ fn validate_full_note_uuid(note_uuid: &str) -> Result<(), ApiError> {
 
 #[cfg(test)]
 mod tests {
-    use super::{CreateNoteInput, NotesRepository};
+    use super::{CreateNoteInput, NotesRepository, UpdateNoteInput};
     use crate::error::ApiError;
     use crate::repositories::database::Database;
     use crate::repositories::sync::list_sync_changes;
@@ -1057,12 +1186,20 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn update_note_content_writes_new_revision() {
+    async fn update_note_writes_new_revision() {
         let repository = notes_repository().await;
         let created = repository.create_note(input("old")).await.unwrap();
 
         let updated = repository
-            .update_note_content(&created.note.id, "new", None)
+            .update_note(
+                &created.note.id,
+                UpdateNoteInput {
+                    content: "new".to_string(),
+                    device_id: None,
+                    field: None,
+                    tags: None,
+                },
+            )
             .await
             .unwrap();
         let revisions = repository
@@ -1077,12 +1214,107 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn update_note_sets_field_and_replaces_tags() {
+        let repository = notes_repository().await;
+        let created = repository.create_note(input("old")).await.unwrap();
+
+        let updated = repository
+            .update_note(
+                &created.note.id,
+                UpdateNoteInput {
+                    content: "new".to_string(),
+                    device_id: None,
+                    field: Some("personal".to_string()),
+                    tags: Some(vec!["api".to_string(), "sqlite".to_string()]),
+                },
+            )
+            .await
+            .unwrap();
+        let tags = repository.list_note_tags(&created.note.id).await.unwrap();
+        let field_name = sqlx::query_scalar::<_, String>(
+            "SELECT name FROM fields WHERE workspace_id = ? AND id = ?",
+        )
+        .bind(crate::repositories::taxonomy::DEFAULT_WORKSPACE_ID)
+        .bind(updated.field_id.as_deref().unwrap())
+        .fetch_one(&repository.pool)
+        .await
+        .unwrap();
+
+        assert_eq!(updated.content, "new");
+        assert_eq!(field_name, "personal");
+        assert_eq!(
+            tags.iter().map(|tag| tag.name.as_str()).collect::<Vec<_>>(),
+            vec!["api", "sqlite"]
+        );
+    }
+
+    #[tokio::test]
+    async fn update_note_keeps_field_and_tags_when_absent() {
+        let repository = notes_repository().await;
+        let created = repository.create_note(input("old")).await.unwrap();
+        let original_tags = repository.list_note_tags(&created.note.id).await.unwrap();
+
+        let updated = repository
+            .update_note(
+                &created.note.id,
+                UpdateNoteInput {
+                    content: "new".to_string(),
+                    device_id: None,
+                    field: None,
+                    tags: None,
+                },
+            )
+            .await
+            .unwrap();
+        let tags = repository.list_note_tags(&created.note.id).await.unwrap();
+
+        assert_eq!(updated.field_id, created.note.field_id);
+        assert_eq!(
+            tags.iter().map(|tag| tag.name.as_str()).collect::<Vec<_>>(),
+            original_tags
+                .iter()
+                .map(|tag| tag.name.as_str())
+                .collect::<Vec<_>>()
+        );
+    }
+
+    #[tokio::test]
+    async fn update_note_can_clear_all_tag_associations() {
+        let repository = notes_repository().await;
+        let created = repository.create_note(input("old")).await.unwrap();
+
+        repository
+            .update_note(
+                &created.note.id,
+                UpdateNoteInput {
+                    content: "new".to_string(),
+                    device_id: None,
+                    field: None,
+                    tags: Some(Vec::new()),
+                },
+            )
+            .await
+            .unwrap();
+        let tags = repository.list_note_tags(&created.note.id).await.unwrap();
+
+        assert!(tags.is_empty());
+    }
+
+    #[tokio::test]
     async fn update_archive_and_delete_record_note_sync_changes() {
         let repository = notes_repository().await;
         let created = repository.create_note(input("old")).await.unwrap();
 
         repository
-            .update_note_content(&created.note.id, "new", None)
+            .update_note(
+                &created.note.id,
+                UpdateNoteInput {
+                    content: "new".to_string(),
+                    device_id: None,
+                    field: None,
+                    tags: None,
+                },
+            )
             .await
             .unwrap();
         repository.archive_note(&created.note.id).await.unwrap();

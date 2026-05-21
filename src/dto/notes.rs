@@ -1,4 +1,4 @@
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 use utoipa::{IntoParams, ToSchema};
 use validator::Validate;
 
@@ -169,6 +169,11 @@ pub struct UpdateNoteRequest {
     pub content: String,
     /// Optional device identifier for the update revision.
     pub device_id: Option<String>,
+    /// Optional field update; absent keeps the current field, null selects inbox.
+    #[serde(default, deserialize_with = "deserialize_optional_field_update")]
+    pub field: Option<Option<String>>,
+    /// Optional replacement tag list; absent keeps current tags.
+    pub tags: Option<Vec<String>>,
 }
 
 /// Returns the default note role for create requests.
@@ -198,4 +203,22 @@ fn validate_hex_note_uuid(note_uuid: &str) -> Result<(), validator::ValidationEr
     } else {
         Err(validator::ValidationError::new("hex_note_uuid"))
     }
+}
+
+/// Deserializes a field update while preserving absent, null, and string states.
+///
+/// # Arguments
+///
+/// * `deserializer` - Serde deserializer for the field value.
+///
+/// # Returns
+///
+/// Returns `None` when absent, `Some(None)` for JSON null, and `Some(Some(value))` for strings.
+fn deserialize_optional_field_update<'de, D>(
+    deserializer: D,
+) -> Result<Option<Option<String>>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    Option::<String>::deserialize(deserializer).map(Some)
 }
