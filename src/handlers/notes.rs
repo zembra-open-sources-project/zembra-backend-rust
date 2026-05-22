@@ -7,8 +7,8 @@ use validator::Validate;
 use crate::dto::notes::{
     BatchCreateNotesRequest, BatchCreateNotesResponse, CreateNoteRequest, DailyNoteCountsResponse,
     FieldNotesResponse, ListNoteRevisionsResponse, ListNoteTagsResponse, ListNotesQuery,
-    ListNotesResponse, NoteResponse, RandomFieldsQuery, RandomNotesQuery, RandomTagsQuery,
-    RecentNotesRequest, TaggedNotesResponse, UpdateNoteRequest,
+    ListNotesResponse, NoteResponse, NotesByDateQuery, NotesByDateResponse, RandomFieldsQuery,
+    RandomNotesQuery, RandomTagsQuery, RecentNotesRequest, TaggedNotesResponse, UpdateNoteRequest,
 };
 use crate::error::ApiError;
 use crate::services::notes::NotesService;
@@ -101,6 +101,39 @@ pub async fn daily_note_counts(
 ) -> Result<Json<DailyNoteCountsResponse>, ApiError> {
     let service = NotesService::new(state.database.pool);
     let response = service.daily_note_counts().await?;
+
+    Ok(Json(response))
+}
+
+/// Lists notes created on one server-local date.
+///
+/// # Arguments
+///
+/// * `state` - Shared application state.
+/// * `query` - Notes-by-date query parameters.
+///
+/// # Returns
+///
+/// Returns visible notes created on the requested date.
+#[utoipa::path(
+    get,
+    path = "/notes/by-date",
+    tag = "notes",
+    params(NotesByDateQuery),
+    responses(
+        (status = 200, description = "Visible notes created on the requested date", body = NotesByDateResponse),
+        (status = 422, description = "Validation error", body = crate::dto::error::ErrorResponse),
+        (status = 500, description = "Database error", body = crate::dto::error::ErrorResponse)
+    )
+)]
+pub async fn notes_by_date(
+    State(state): State<crate::app::AppState>,
+    Query(query): Query<NotesByDateQuery>,
+) -> Result<Json<NotesByDateResponse>, ApiError> {
+    query.validate().map_err(|_| ApiError::Validation)?;
+
+    let service = NotesService::new(state.database.pool);
+    let response = service.notes_by_date(query).await?;
 
     Ok(Json(response))
 }

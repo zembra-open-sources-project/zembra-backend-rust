@@ -269,6 +269,39 @@ impl NotesRepository {
         .map_err(ApiError::from)
     }
 
+    /// Lists visible notes created within a timestamp range.
+    ///
+    /// # Arguments
+    ///
+    /// * `start_timestamp` - Inclusive Unix timestamp for the local day start.
+    /// * `end_timestamp` - Exclusive Unix timestamp for the next local day start.
+    ///
+    /// # Returns
+    ///
+    /// Returns non-deleted and non-archived note records created within the range.
+    pub async fn list_visible_notes_created_between(
+        &self,
+        start_timestamp: i64,
+        end_timestamp: i64,
+    ) -> Result<Vec<NoteRecord>, ApiError> {
+        sqlx::query_as::<_, NoteRecord>(
+            "SELECT id, content, role, field_id, created_at, updated_at, archived_at, deleted_at, current_revision_id \
+             FROM notes \
+             WHERE workspace_id = ? \
+             AND deleted_at IS NULL \
+             AND archived_at IS NULL \
+             AND created_at >= ? \
+             AND created_at < ? \
+             ORDER BY created_at DESC, id DESC",
+        )
+        .bind(DEFAULT_WORKSPACE_ID)
+        .bind(start_timestamp)
+        .bind(end_timestamp)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(ApiError::from)
+    }
+
     /// Lists random tags from the default workspace.
     ///
     /// # Arguments

@@ -937,6 +937,7 @@ mod tests {
         assert!(body["paths"].get("/notes").is_some());
         assert!(body["paths"].get("/notes/recent").is_some());
         assert!(body["paths"].get("/notes/stats/daily-counts").is_some());
+        assert!(body["paths"].get("/notes/by-date").is_some());
         assert!(body["paths"].get("/random/notes").is_some());
         assert!(body["paths"].get("/random/tags").is_some());
         assert!(body["paths"].get("/random/fields").is_some());
@@ -1296,6 +1297,124 @@ mod tests {
         assert_eq!(days[28]["date"], yesterday_key);
         assert_eq!(days[28]["count"], 1);
         assert!(days.iter().take(28).all(|day| day["count"] == 0));
+    }
+
+    #[tokio::test]
+    async fn notes_by_date_route_returns_ordered_visible_notes_for_date() {
+        use chrono::{Duration, Local, TimeZone};
+
+        let state = test_state().await;
+        let target_date = Local::now().date_naive();
+        let other_date = target_date - Duration::days(1);
+        let older_timestamp = Local
+            .from_local_datetime(&target_date.and_hms_opt(9, 0, 0).unwrap())
+            .single()
+            .unwrap()
+            .timestamp();
+        let newer_timestamp = Local
+            .from_local_datetime(&target_date.and_hms_opt(17, 0, 0).unwrap())
+            .single()
+            .unwrap()
+            .timestamp();
+        let other_timestamp = Local
+            .from_local_datetime(&other_date.and_hms_opt(12, 0, 0).unwrap())
+            .single()
+            .unwrap()
+            .timestamp();
+        let older = create_note(&state, "older target").await;
+        let newer = create_note(&state, "newer target").await;
+        let other = create_note(&state, "other date").await;
+
+        set_created_at(&state, &older, older_timestamp).await;
+        set_created_at(&state, &newer, newer_timestamp).await;
+        set_created_at(&state, &other, other_timestamp).await;
+
+        let target_key = target_date.format("%Y-%m-%d").to_string();
+        let response = send_with_state(
+            state,
+            Request::builder()
+                .uri(format!("/notes/by-date?date={target_key}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await;
+        let status = response.status();
+        let body = response_json(response).await;
+
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(body["date"], target_key);
+        assert_eq!(body["notes"].as_array().unwrap().len(), 2);
+        assert_eq!(body["notes"][0]["content"], "newer target");
+        assert_eq!(body["notes"][1]["content"], "older target");
+    }
+
+    #[tokio::test]
+    async fn notes_by_date_route_filters_archived_and_deleted_notes() {
+        use chrono::{Local, TimeZone};
+
+        let state = test_state().await;
+        let target_date = Local::now().date_naive();
+        let timestamp = Local
+            .from_local_datetime(&target_date.and_hms_opt(12, 0, 0).unwrap())
+            .single()
+            .unwrap()
+            .timestamp();
+        let visible = create_note(&state, "visible").await;
+        let archived = create_note(&state, "archived").await;
+        let deleted = create_note(&state, "deleted").await;
+
+        set_created_at(&state, &visible, timestamp).await;
+        set_created_at(&state, &archived, timestamp).await;
+        set_created_at(&state, &deleted, timestamp).await;
+
+        let service = crate::services::notes::NotesService::new(state.database.pool.clone());
+        service.archive_note(&archived).await.unwrap();
+        service.delete_note(&deleted).await.unwrap();
+
+        let target_key = target_date.format("%Y-%m-%d").to_string();
+        let response = send_with_state(
+            state,
+            Request::builder()
+                .uri(format!("/notes/by-date?date={target_key}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await;
+        let status = response.status();
+        let body = response_json(response).await;
+
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(body["notes"].as_array().unwrap().len(), 1);
+        assert_eq!(body["notes"][0]["content"], "visible");
+    }
+
+    #[tokio::test]
+    async fn notes_by_date_route_returns_empty_for_date_without_notes() {
+        let response = send(
+            Request::builder()
+                .uri("/notes/by-date?date=2026-05-22")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await;
+        let status = response.status();
+        let body = response_json(response).await;
+
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(body["date"], "2026-05-22");
+        assert_eq!(body["notes"], json!([]));
+    }
+
+    #[tokio::test]
+    async fn notes_by_date_route_rejects_missing_or_invalid_date() {
+        for uri in ["/notes/by-date", "/notes/by-date?date=2026-13-40"] {
+            let response = send(Request::builder().uri(uri).body(Body::empty()).unwrap()).await;
+            let status = response.status();
+            let body = response_json(response).await;
+
+            assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+            assert_eq!(body["error"]["code"], "validation_error");
+        }
     }
 
     #[tokio::test]

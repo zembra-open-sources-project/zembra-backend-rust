@@ -5,9 +5,9 @@ use sqlx::SqlitePool;
 
 use crate::dto::notes::{
     BatchCreateNotesResponse, CreateNoteRequest, DailyNoteCount, DailyNoteCountsResponse,
-    FieldNotesGroup, FieldNotesResponse, NoteMetadata, NoteResponse, RandomFieldsQuery,
-    RandomNotesQuery, RandomTagsQuery, RecentNotesRequest, TaggedNotesGroup, TaggedNotesResponse,
-    UpdateNoteRequest,
+    FieldNotesGroup, FieldNotesResponse, NoteMetadata, NoteResponse, NotesByDateQuery,
+    NotesByDateResponse, RandomFieldsQuery, RandomNotesQuery, RandomTagsQuery, RecentNotesRequest,
+    TaggedNotesGroup, TaggedNotesResponse, UpdateNoteRequest,
 };
 use crate::error::ApiError;
 use crate::models::note::NoteRecord;
@@ -142,6 +142,32 @@ impl NotesService {
     pub async fn daily_note_counts(&self) -> Result<DailyNoteCountsResponse, ApiError> {
         self.daily_note_counts_for_today(Local::now().date_naive())
             .await
+    }
+
+    /// Lists visible notes created on one server-local date.
+    ///
+    /// # Arguments
+    ///
+    /// * `query` - Validated notes-by-date query.
+    ///
+    /// # Returns
+    ///
+    /// Returns visible notes created on the requested local date.
+    pub async fn notes_by_date(
+        &self,
+        query: NotesByDateQuery,
+    ) -> Result<NotesByDateResponse, ApiError> {
+        let date = query.date.ok_or(ApiError::Validation)?;
+        let parsed_date =
+            NaiveDate::parse_from_str(&date, "%Y-%m-%d").map_err(|_| ApiError::Validation)?;
+        let start_timestamp = local_start_of_day_timestamp(parsed_date);
+        let end_timestamp = local_start_of_day_timestamp(parsed_date + Duration::days(1));
+        let notes = self
+            .repository
+            .list_visible_notes_created_between(start_timestamp, end_timestamp)
+            .await?;
+
+        Ok(NotesByDateResponse { date, notes })
     }
 
     /// Counts visible notes created per local day ending at a supplied date.

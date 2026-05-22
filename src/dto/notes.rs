@@ -56,6 +56,14 @@ pub struct RandomNotesQuery {
     pub n: i64,
 }
 
+/// Query parameters used by the notes-by-date endpoint.
+#[derive(Debug, Clone, Deserialize, Validate, IntoParams)]
+pub struct NotesByDateQuery {
+    /// Server-local creation date in `YYYY-MM-DD` format.
+    #[validate(required, custom(function = "validate_note_date"))]
+    pub date: Option<String>,
+}
+
 /// Request body for creating a single note.
 #[derive(Debug, Clone, Deserialize, Validate, ToSchema)]
 pub struct CreateNoteRequest {
@@ -114,6 +122,15 @@ pub struct ListNotesResponse {
 pub struct DailyNoteCountsResponse {
     /// Daily note count buckets ordered by date ascending.
     pub days: Vec<DailyNoteCount>,
+}
+
+/// Response body for listing notes created on one date.
+#[derive(Debug, Clone, Serialize, ToSchema)]
+pub struct NotesByDateResponse {
+    /// Server-local date in `YYYY-MM-DD` format.
+    pub date: String,
+    /// Visible notes created on the date.
+    pub notes: Vec<NoteRecord>,
 }
 
 /// Note count for a server-local calendar date.
@@ -244,6 +261,21 @@ fn validate_hex_note_uuid(note_uuid: &str) -> Result<(), validator::ValidationEr
     } else {
         Err(validator::ValidationError::new("hex_note_uuid"))
     }
+}
+
+/// Validates a server-local note date string.
+///
+/// # Arguments
+///
+/// * `date` - Date candidate from query parameters.
+///
+/// # Returns
+///
+/// Returns `Ok(())` when the value is a valid `YYYY-MM-DD` calendar date.
+fn validate_note_date(date: &str) -> Result<(), validator::ValidationError> {
+    chrono::NaiveDate::parse_from_str(date, "%Y-%m-%d")
+        .map(|_| ())
+        .map_err(|_| validator::ValidationError::new("note_date"))
 }
 
 /// Deserializes a field update while preserving absent, null, and string states.
