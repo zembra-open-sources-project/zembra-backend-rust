@@ -1,6 +1,15 @@
 use std::collections::HashSet;
 
-use sqlx::{FromRow, Sqlite, SqlitePool, Transaction};
+mod payloads;
+mod types;
+mod validation;
+
+pub use types::{CreateNoteInput, CreatedNote, DailyNoteCountRow, NoteLinkInput, UpdateNoteInput};
+
+use payloads::{note_link_payload, note_payload, note_tag_entity_id, note_tag_payload};
+use validation::{validate_full_note_uuid, validate_note_ref};
+
+use sqlx::{Sqlite, SqlitePool, Transaction};
 
 use crate::error::ApiError;
 use crate::models::field::FieldRecord;
@@ -13,71 +22,6 @@ use crate::repositories::taxonomy::{
     DEFAULT_WORKSPACE_ID, get_or_create_field_in_transaction, get_or_create_tag_in_transaction,
     new_id,
 };
-
-/// Input data used to create a note.
-#[derive(Debug, Clone)]
-pub struct CreateNoteInput {
-    /// Note body content.
-    pub content: String,
-    /// Optional normalized field name.
-    pub field: Option<String>,
-    /// Normalized tag names.
-    pub tags: Vec<String>,
-    /// Role that created the note.
-    pub role: String,
-    /// Optional device identifier for the initial revision.
-    pub device_id: Option<String>,
-    /// Normalized outgoing note links parsed by the client.
-    pub links: Vec<NoteLinkInput>,
-}
-
-/// Result returned after note creation.
-#[derive(Debug, Clone)]
-pub struct CreatedNote {
-    /// Persisted note record.
-    pub note: NoteRecord,
-    /// Resolved field name.
-    pub field: Option<String>,
-    /// Resolved tag names.
-    pub tags: Vec<String>,
-    /// Persisted outgoing note links.
-    pub links: Vec<NoteLinkRecord>,
-}
-
-/// Input data used to update a note.
-#[derive(Debug, Clone)]
-pub struct UpdateNoteInput {
-    /// New note body content.
-    pub content: String,
-    /// Optional device identifier for the update revision.
-    pub device_id: Option<String>,
-    /// Optional normalized field name; absent keeps the current field.
-    pub field: Option<String>,
-    /// Optional normalized replacement tags; absent keeps current tags.
-    pub tags: Option<Vec<String>>,
-    /// Optional normalized replacement links; absent keeps current links.
-    pub links: Option<Vec<NoteLinkInput>>,
-}
-
-/// Input data used to create or replace a note link.
-#[derive(Debug, Clone)]
-pub struct NoteLinkInput {
-    /// Target note full ID or unique prefix.
-    pub target_note_ref: String,
-    /// Optional link text parsed by the client.
-    pub anchor_text: Option<String>,
-    /// Optional zero-based position parsed by the client.
-    pub position: Option<i64>,
-}
-
-/// Aggregated note count for one local calendar date.
-#[derive(Debug, Clone, FromRow)]
-pub struct DailyNoteCountRow {
-    /// Server-local date in `YYYY-MM-DD` format.
-    pub date: String,
-    /// Number of visible notes created on the date.
-    pub count: i64,
-}
 
 /// Repository for note data access.
 #[derive(Debug, Clone)]
@@ -1304,131 +1248,6 @@ async fn resolve_visible_note_by_ref_in_transaction(
             "Note reference \"{note_ref}\" matched multiple visible notes."
         ))),
     }
-}
-
-/// Builds a sync payload for a note record.
-///
-/// # Arguments
-///
-/// * `note` - Note record to serialize.
-///
-/// # Returns
-///
-/// Returns a JSON payload containing the workspace-scoped note snapshot.
-fn note_payload(note: &NoteRecord) -> serde_json::Value {
-    serde_json::json!({
-        "id": note.id,
-        "workspace_id": DEFAULT_WORKSPACE_ID,
-        "content": note.content,
-        "role": note.role,
-        "field_id": note.field_id,
-        "created_at": note.created_at,
-        "updated_at": note.updated_at,
-        "archived_at": note.archived_at,
-        "deleted_at": note.deleted_at,
-        "current_revision_id": note.current_revision_id
-    })
-}
-
-/// Builds a stable synthetic entity ID for a note/tag relation.
-///
-/// # Arguments
-///
-/// * `note_id` - Note identifier.
-/// * `tag_id` - Tag identifier.
-///
-/// # Returns
-///
-/// Returns a relation identifier.
-fn note_tag_entity_id(note_id: &str, tag_id: &str) -> String {
-    format!("{note_id}:{tag_id}")
-}
-
-/// Builds a sync payload for a note/tag relation.
-///
-/// # Arguments
-///
-/// * `note_id` - Note identifier.
-/// * `tag_id` - Tag identifier.
-///
-/// # Returns
-///
-/// Returns a JSON payload for the relation change.
-fn note_tag_payload(note_id: &str, tag_id: &str) -> serde_json::Value {
-    serde_json::json!({
-        "workspace_id": DEFAULT_WORKSPACE_ID,
-        "note_id": note_id,
-        "tag_id": tag_id
-    })
-}
-
-/// Builds a sync payload for a note link relation.
-///
-/// # Arguments
-///
-/// * `link` - Persisted note link record.
-///
-/// # Returns
-///
-/// Returns a JSON payload for the relation change.
-fn note_link_payload(link: &NoteLinkRecord) -> serde_json::Value {
-    serde_json::json!({
-        "id": link.id,
-        "workspace_id": DEFAULT_WORKSPACE_ID,
-        "source_note_id": link.source_note_id,
-        "target_note_id": link.target_note_id,
-        "anchor_text": link.anchor_text,
-        "position": link.position,
-        "created_at": link.created_at
-    })
-}
-
-/// Validates a note reference before SQL lookup.
-///
-/// # Arguments
-///
-/// * `note_ref` - Full note ID or prefix.
-///
-/// # Returns
-///
-/// Returns `Ok(())` when the reference can be queried safely.
-fn validate_note_ref(note_ref: &str) -> Result<(), ApiError> {
-    if note_ref.len() < 4 {
-        return Err(ApiError::NoteReferenceTooShort);
-    }
-
-    if !note_ref
-        .chars()
-        .all(|character| character.is_ascii_hexdigit())
-    {
-        return Err(ApiError::InvalidNoteReference);
-    }
-
-    Ok(())
-}
-
-/// Validates a full note UUID before cursor lookup.
-///
-/// # Arguments
-///
-/// * `note_uuid` - Full note ID.
-///
-/// # Returns
-///
-/// Returns `Ok(())` when the UUID is a 32-character hexadecimal string.
-fn validate_full_note_uuid(note_uuid: &str) -> Result<(), ApiError> {
-    if note_uuid.len() != 32 {
-        return Err(ApiError::Validation);
-    }
-
-    if !note_uuid
-        .chars()
-        .all(|character| character.is_ascii_hexdigit())
-    {
-        return Err(ApiError::Validation);
-    }
-
-    Ok(())
 }
 
 #[cfg(test)]
