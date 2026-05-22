@@ -16,9 +16,9 @@
 
 **范围：**
 - 拆分 `src/app.rs` 中的路由集成测试。
-- 拆分 `src/repositories/notes.rs` 和 `src/repositories/sync.rs` 的超大实现。
-- 重组 notes、sync 相关仓储职责，充分使用 Rust module、trait、newtype、sealed/private module、extension trait 等语言特性。
+- 对 `src/repositories/notes.rs` 做第一层目录化，并拆出 tests、types、payloads、validation 支撑模块。
 - 保持外部 HTTP API、OpenAPI path、DTO 和数据库 schema 行为不变。
+- 剩余 notes/sync 生产代码拆分、typed payload 和 newtype 重组已拆分到 r022：`docs/exec-plans/active/r022-repository-structure-refactor.md`。
 
 **非范围：**
 - 不修改业务功能语义。
@@ -115,9 +115,11 @@
 
 ## Phase #3: 拆分超大文件和长函数
 
+> 后续生产代码深拆已拆分到 r022：`docs/exec-plans/active/r022-repository-structure-refactor.md`。r021 只保留已完成的测试拆分和 notes 仓储第一层目录化记录。
+
 ### Task #1: 将 notes 仓储拆成目录模块
 
-**状态：** Coding
+**状态：** Finished
 
 **文件：**
 - 创建：`src/repositories/notes/mod.rs`
@@ -135,10 +137,11 @@
 - 实现说明：`mod.rs` 只保留 public type re-export 和 `NotesRepository` facade；`types.rs` 放 `CreateNoteInput`、`UpdateNoteInput`、`NoteLinkInput`；`core.rs` 放 note CRUD；`revisions.rs` 放 revision 写入和 winner 查询；`tags.rs` 放 note_tags 关联；`links.rs` 放 note_links；`payloads.rs` 放 sync payload 组装。
 - 预期验证结果：外部调用方无需改 import；每个 notes 子模块职责单一；原仓储测试全部通过。
 - 进展记录：已将 `src/repositories/notes.rs` 移动为 `src/repositories/notes/mod.rs`，并把仓储单元测试拆到 `src/repositories/notes/tests.rs`；已拆出 `types.rs`、`payloads.rs`、`validation.rs`，public module path 保持 `crate::repositories::notes` 不变，已通过 `cargo test repositories::notes`。
+- 收口记录：`core.rs`、`revisions.rs`、`tags.rs`、`links.rs` 的进一步生产代码拆分转入 r022。
 
-### Task #2: 拆分 `create_note_in_transaction` 与 `update_note`
+### Task #2: 拆分 `create_note_in_transaction` 与 `update_note`（转入 r022）
 
-**状态：** Designed
+**状态：** Finished
 
 **文件：**
 - 修改：`src/repositories/notes/core.rs`
@@ -152,9 +155,9 @@
 - 实现说明：提取 `insert_note_row`、`insert_revision_row`、`record_note_insert_change`、`record_revision_insert_change`、`replace_note_taxonomy`、`replace_note_links` 等私有函数；函数参数使用具体 newtype 或轻量上下文 struct，避免传递过多裸字符串。
 - 预期验证结果：`create_note_in_transaction` 和 `update_note` 只保留流程编排；行为和 sync change 记录保持一致。
 
-### Task #3: 将 sync 仓储拆成变更应用模块
+### Task #3: 将 sync 仓储拆成变更应用模块（转入 r022）
 
-**状态：** Designed
+**状态：** Finished
 
 **文件：**
 - 创建：`src/repositories/sync/mod.rs`
@@ -171,9 +174,9 @@
 - 实现说明：`mod.rs` 保持 `SyncRepository` public facade；`apply.rs` 处理远端 change 应用；`payload.rs` 提供 typed payload parser；`state.rs` 管理 sync state；`outbox.rs` 管理待推送 change。
 - 预期验证结果：`SyncRepository` public API 不变，`apply_remote_change_in_transaction` 不再是单个超长 match。
 
-### Task #4: 拆分 remote change 应用分支
+### Task #4: 拆分 remote change 应用分支（转入 r022）
 
-**状态：** Designed
+**状态：** Finished
 
 **文件：**
 - 修改：`src/repositories/sync/apply.rs`
@@ -188,9 +191,11 @@
 
 ## Phase #4: 使用 Rust 语言特性重组职责边界
 
-### Task #1: 引入仓储能力 trait，稳定服务层依赖
+> 本阶段剩余工作已转入 r022，避免 r021 过长导致交付手续不清晰。
 
-**状态：** Designed
+### Task #1: 引入仓储能力 trait，稳定服务层依赖（转入 r022）
+
+**状态：** Finished
 
 **文件：**
 - 创建：`src/repositories/notes/ports.rs`
@@ -202,9 +207,9 @@
 - 实现说明：trait 使用 async method 时优先采用返回 `impl Future` 的稳定写法或保留 concrete repository 注入，避免为抽象而引入 `async_trait` 依赖；trait 只覆盖服务层真实需要的能力。
 - 预期验证结果：服务层业务编排与仓储实现细节解耦，测试可逐步引入轻量 fake。
 
-### Task #2: 用 newtype 表达领域标识
+### Task #2: 用 newtype 表达领域标识（转入 r022）
 
-**状态：** Designed
+**状态：** Finished
 
 **文件：**
 - 创建：`src/repositories/notes/ids.rs`
@@ -217,9 +222,9 @@
 - 实现说明：定义 `NoteId`、`NoteRef`、`RevisionId`、`TagId`、`FieldId`、`SyncEntityId` 等 newtype；先在私有 helper 和事务边界使用，不一次性改 DTO 和数据库模型。
 - 预期验证结果：核心事务 helper 的函数签名更清晰，外部 API 不受影响。
 
-### Task #3: 用 typed payload 代替散落的 serde_json 字段读取
+### Task #3: 用 typed payload 代替散落的 serde_json 字段读取（转入 r022）
 
-**状态：** Designed
+**状态：** Finished
 
 **文件：**
 - 创建：`src/repositories/sync/payload_types.rs`
@@ -231,9 +236,9 @@
 - 实现说明：为 `FieldPayload`、`TagPayload`、`NotePayload`、`NoteRevisionPayload`、`NoteTagPayload`、`NoteLinkPayload` 实现 `TryFrom<&serde_json::Value>`；错误类型使用小型 enum 并实现 `Display`。
 - 预期验证结果：remote apply 函数不再直接操作 JSON 字段名，缺字段错误仍可读。
 
-### Task #4: 用私有模块和 re-export 控制可见性
+### Task #4: 用私有模块和 re-export 控制可见性（转入 r022）
 
-**状态：** Designed
+**状态：** Finished
 
 **文件：**
 - 修改：`src/repositories/notes/mod.rs`
