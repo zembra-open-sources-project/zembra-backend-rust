@@ -117,7 +117,7 @@
 
 ### Task #1: 将 notes 仓储拆成目录模块
 
-**状态：** Designed
+**状态：** Coding
 
 **文件：**
 - 创建：`src/repositories/notes/mod.rs`
@@ -134,6 +134,7 @@
 - 功能：把 `src/repositories/notes.rs` 从单文件拆为目录模块，保持 `crate::repositories::notes::NotesRepository` 和输入类型路径稳定。
 - 实现说明：`mod.rs` 只保留 public type re-export 和 `NotesRepository` facade；`types.rs` 放 `CreateNoteInput`、`UpdateNoteInput`、`NoteLinkInput`；`core.rs` 放 note CRUD；`revisions.rs` 放 revision 写入和 winner 查询；`tags.rs` 放 note_tags 关联；`links.rs` 放 note_links；`payloads.rs` 放 sync payload 组装。
 - 预期验证结果：外部调用方无需改 import；每个 notes 子模块职责单一；原仓储测试全部通过。
+- 进展记录：已将 `src/repositories/notes.rs` 移动为 `src/repositories/notes/mod.rs`，并把仓储单元测试拆到 `src/repositories/notes/tests.rs`；public module path 保持 `crate::repositories::notes` 不变，已通过 `cargo test repositories::notes`。
 
 ### Task #2: 拆分 `create_note_in_transaction` 与 `update_note`
 
