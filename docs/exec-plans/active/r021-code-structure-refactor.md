@@ -94,7 +94,7 @@
 - 功能：把 create/update/archive/delete、recent/random/date 查询、field/tag、note links 相关测试从 `src/app.rs` 拆出。
 - 实现说明：每个测试文件只验证一个业务主题；共享构造逻辑统一走 `tests/support`；测试命名保留原语义，方便 `cargo test <old_name>` 定位。
 - 预期验证结果：`src/app.rs` 不再承担路由集成测试集合职责，HTTP 行为测试仍覆盖原有关键路径。
-- 进展记录：已创建 `tests/notes_crud_routes.rs`，迁移 create note 成功和 invalid role 两条测试，并通过定向测试。
+- 进展记录：已创建 `tests/notes_crud_routes.rs`、`tests/notes_links_routes.rs`、`tests/notes_taxonomy_routes.rs`、`tests/notes_query_routes.rs`，迁移 create、link metadata、patch taxonomy、recent notes、daily counts、notes by date 测试，并通过定向测试与 `cargo test --all-targets`。random notes/tags/fields 路由测试仍留在 `src/app.rs`，下一个检查点继续迁移。
 
 ### Task #3: 拆分 sync 配置与 sync 操作测试
 
