@@ -25,7 +25,6 @@ pub struct AppState {
 /// # Returns
 ///
 /// Returns an Axum router containing infrastructure routes only.
-#[cfg(test)]
 pub fn build_router(state: AppState) -> Router {
     build_router_with_cors(state, Vec::new())
 }
@@ -220,10 +219,7 @@ fn origin_parts(origin: &str) -> Option<OriginParts<'_>> {
 #[cfg(test)]
 mod tests {
     use axum::body::{Body, to_bytes};
-    use axum::http::{
-        HeaderValue, Method, Request, StatusCode,
-        header::{ACCESS_CONTROL_ALLOW_ORIGIN, ACCESS_CONTROL_REQUEST_METHOD, ORIGIN},
-    };
+    use axum::http::{Request, StatusCode};
     use axum::response::Response;
     use serde_json::{Value, json};
     use std::sync::atomic::{AtomicUsize, Ordering};
@@ -281,28 +277,6 @@ mod tests {
     /// Returns the HTTP response produced by the router.
     async fn send_with_state(state: super::AppState, request: Request<Body>) -> Response {
         super::build_router(state).oneshot(request).await.unwrap()
-    }
-
-    /// Sends a request to the application router with explicit CORS origins.
-    ///
-    /// # Arguments
-    ///
-    /// * `state` - Shared application state for the router.
-    /// * `cors_allowed_origins` - Browser origin rules allowed by the router.
-    /// * `request` - HTTP request to dispatch through the router.
-    ///
-    /// # Returns
-    ///
-    /// Returns the HTTP response produced by the router.
-    async fn send_with_cors(
-        state: super::AppState,
-        cors_allowed_origins: Vec<crate::config::CorsOriginRule>,
-        request: Request<Body>,
-    ) -> Response {
-        super::build_router_with_cors(state, cors_allowed_origins)
-            .oneshot(request)
-            .await
-            .unwrap()
     }
 
     /// Creates a note through the notes service.
@@ -432,248 +406,6 @@ mod tests {
     async fn response_json(response: Response) -> Value {
         let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
         serde_json::from_slice(&body).unwrap()
-    }
-
-    #[tokio::test]
-    async fn health_route_returns_ok() {
-        let response = send(
-            Request::builder()
-                .uri("/health")
-                .body(Body::empty())
-                .unwrap(),
-        )
-        .await;
-
-        assert_eq!(response.status(), StatusCode::OK);
-    }
-
-    #[tokio::test]
-    async fn cors_preflight_allows_configured_origin() {
-        let origin = HeaderValue::from_static("http://192.168.1.20:5173");
-        let response = send_with_cors(
-            test_state().await,
-            vec![crate::config::CorsOriginRule::Exact(origin.clone())],
-            Request::builder()
-                .method(Method::OPTIONS)
-                .uri("/notes")
-                .header(ORIGIN, origin.clone())
-                .header(ACCESS_CONTROL_REQUEST_METHOD, "POST")
-                .body(Body::empty())
-                .unwrap(),
-        )
-        .await;
-
-        assert_eq!(response.status(), StatusCode::OK);
-        assert_eq!(
-            response.headers().get(ACCESS_CONTROL_ALLOW_ORIGIN),
-            Some(&origin)
-        );
-    }
-
-    #[tokio::test]
-    async fn cors_preflight_allows_default_localhost_origin() {
-        let origin = HeaderValue::from_static("http://localhost:5173");
-        let response = send_with_cors(
-            test_state().await,
-            Vec::new(),
-            Request::builder()
-                .method(Method::OPTIONS)
-                .uri("/notes")
-                .header(ORIGIN, origin.clone())
-                .header(ACCESS_CONTROL_REQUEST_METHOD, "POST")
-                .body(Body::empty())
-                .unwrap(),
-        )
-        .await;
-
-        assert_eq!(response.status(), StatusCode::OK);
-        assert_eq!(
-            response.headers().get(ACCESS_CONTROL_ALLOW_ORIGIN),
-            Some(&origin)
-        );
-    }
-
-    #[tokio::test]
-    async fn cors_preflight_allows_default_loopback_origin() {
-        let origin = HeaderValue::from_static("http://127.0.0.1:5173");
-        let response = send_with_cors(
-            test_state().await,
-            Vec::new(),
-            Request::builder()
-                .method(Method::OPTIONS)
-                .uri("/notes")
-                .header(ORIGIN, origin.clone())
-                .header(ACCESS_CONTROL_REQUEST_METHOD, "POST")
-                .body(Body::empty())
-                .unwrap(),
-        )
-        .await;
-
-        assert_eq!(response.status(), StatusCode::OK);
-        assert_eq!(
-            response.headers().get(ACCESS_CONTROL_ALLOW_ORIGIN),
-            Some(&origin)
-        );
-    }
-
-    #[tokio::test]
-    async fn cors_preflight_requires_config_for_private_lan_origin() {
-        let response = send_with_cors(
-            test_state().await,
-            Vec::new(),
-            Request::builder()
-                .method(Method::OPTIONS)
-                .uri("/notes")
-                .header(ORIGIN, "http://192.168.1.20:5173")
-                .header(ACCESS_CONTROL_REQUEST_METHOD, "POST")
-                .body(Body::empty())
-                .unwrap(),
-        )
-        .await;
-
-        assert_eq!(response.status(), StatusCode::OK);
-        assert!(
-            response
-                .headers()
-                .get(ACCESS_CONTROL_ALLOW_ORIGIN)
-                .is_none()
-        );
-    }
-
-    #[tokio::test]
-    async fn cors_preflight_allows_configured_ipv4_wildcard_origin() {
-        let origin = HeaderValue::from_static("http://192.168.1.20:5173");
-        let settings = crate::config::ServerSettings {
-            host: "127.0.0.1".to_string(),
-            port: 3000,
-            cors_allowed_origins: vec!["http://192.168.1.*:5173".to_string()],
-        };
-        let response = send_with_cors(
-            test_state().await,
-            settings.cors_origin_rules().unwrap(),
-            Request::builder()
-                .method(Method::OPTIONS)
-                .uri("/notes")
-                .header(ORIGIN, origin.clone())
-                .header(ACCESS_CONTROL_REQUEST_METHOD, "POST")
-                .body(Body::empty())
-                .unwrap(),
-        )
-        .await;
-
-        assert_eq!(response.status(), StatusCode::OK);
-        assert_eq!(
-            response.headers().get(ACCESS_CONTROL_ALLOW_ORIGIN),
-            Some(&origin)
-        );
-    }
-
-    #[tokio::test]
-    async fn cors_preflight_rejects_wildcard_origin_on_different_port() {
-        let settings = crate::config::ServerSettings {
-            host: "127.0.0.1".to_string(),
-            port: 3000,
-            cors_allowed_origins: vec!["http://192.168.1.*:5173".to_string()],
-        };
-        let response = send_with_cors(
-            test_state().await,
-            settings.cors_origin_rules().unwrap(),
-            Request::builder()
-                .method(Method::OPTIONS)
-                .uri("/notes")
-                .header(ORIGIN, "http://192.168.1.20:5174")
-                .header(ACCESS_CONTROL_REQUEST_METHOD, "POST")
-                .body(Body::empty())
-                .unwrap(),
-        )
-        .await;
-
-        assert_eq!(response.status(), StatusCode::OK);
-        assert!(
-            response
-                .headers()
-                .get(ACCESS_CONTROL_ALLOW_ORIGIN)
-                .is_none()
-        );
-    }
-
-    #[tokio::test]
-    async fn cors_preflight_rejects_public_unconfigured_origin() {
-        let response = send_with_cors(
-            test_state().await,
-            vec![crate::config::CorsOriginRule::Exact(
-                HeaderValue::from_static("http://192.168.1.20:5173"),
-            )],
-            Request::builder()
-                .method(Method::OPTIONS)
-                .uri("/notes")
-                .header(ORIGIN, "https://example.com")
-                .header(ACCESS_CONTROL_REQUEST_METHOD, "POST")
-                .body(Body::empty())
-                .unwrap(),
-        )
-        .await;
-
-        assert_eq!(response.status(), StatusCode::OK);
-        assert!(
-            response
-                .headers()
-                .get(ACCESS_CONTROL_ALLOW_ORIGIN)
-                .is_none()
-        );
-    }
-
-    #[tokio::test]
-    async fn create_note_route_returns_created_note() {
-        let response = send(
-            Request::builder()
-                .method("POST")
-                .uri("/notes")
-                .header("content-type", "application/json")
-                .body(Body::from(
-                    json!({
-                        "content": "api note",
-                        "field": "work",
-                        "tags": ["rust", "rust", "api"],
-                        "role": "Human",
-                        "device_id": null
-                    })
-                    .to_string(),
-                ))
-                .unwrap(),
-        )
-        .await;
-        let status = response.status();
-        let body = response_json(response).await;
-
-        assert_eq!(status, StatusCode::CREATED);
-        assert_eq!(body["note"]["content"], "api note");
-        assert_eq!(body["metadata"]["field"], "work");
-        assert_eq!(body["metadata"]["tags"], json!(["rust", "api"]));
-    }
-
-    #[tokio::test]
-    async fn create_note_rejects_invalid_role() {
-        let response = send(
-            Request::builder()
-                .method("POST")
-                .uri("/notes")
-                .header("content-type", "application/json")
-                .body(Body::from(
-                    json!({
-                        "content": "api note",
-                        "role": "Robot"
-                    })
-                    .to_string(),
-                ))
-                .unwrap(),
-        )
-        .await;
-        let status = response.status();
-        let body = response_json(response).await;
-
-        assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
-        assert_eq!(body["error"]["code"], "validation_error");
     }
 
     #[tokio::test]
@@ -918,68 +650,6 @@ mod tests {
 
         assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
         assert_eq!(body["error"]["code"], "validation_error");
-    }
-
-    #[tokio::test]
-    async fn openapi_json_lists_runtime_api_paths() {
-        let response = send(
-            Request::builder()
-                .uri("/api-docs/openapi.json")
-                .body(Body::empty())
-                .unwrap(),
-        )
-        .await;
-        let status = response.status();
-        let body = response_json(response).await;
-
-        assert_eq!(status, StatusCode::OK);
-        assert!(body["paths"].get("/health").is_some());
-        assert!(body["paths"].get("/notes").is_some());
-        assert!(body["paths"].get("/notes/recent").is_some());
-        assert!(body["paths"].get("/notes/stats/daily-counts").is_some());
-        assert!(body["paths"].get("/notes/by-date").is_some());
-        assert!(body["paths"].get("/random/notes").is_some());
-        assert!(body["paths"].get("/random/tags").is_some());
-        assert!(body["paths"].get("/random/fields").is_some());
-        assert!(body["paths"].get("/notes/batch").is_some());
-        assert!(body["paths"].get("/fields").is_some());
-        assert!(body["paths"].get("/tags").is_some());
-        assert!(body["paths"].get("/sync/status").is_some());
-        assert!(body["paths"].get("/sync/config").is_some());
-        assert!(body["paths"].get("/sync/config/test").is_some());
-        assert!(body["paths"].get("/sync/run").is_some());
-        assert!(body["paths"].get("/sync/push").is_some());
-        assert!(body["paths"].get("/sync/pull").is_some());
-        assert!(
-            body["components"]["schemas"]["UpdateNoteRequest"]["properties"]
-                .get("field")
-                .is_some()
-        );
-        assert!(
-            body["components"]["schemas"]["UpdateNoteRequest"]["properties"]
-                .get("tags")
-                .is_some()
-        );
-        assert!(
-            body["components"]["schemas"]["CreateNoteRequest"]["properties"]
-                .get("links")
-                .is_some()
-        );
-        assert!(
-            body["components"]["schemas"]["UpdateNoteRequest"]["properties"]
-                .get("links")
-                .is_some()
-        );
-        assert!(
-            body["components"]["schemas"]["NoteMetadata"]["properties"]
-                .get("outgoing_links")
-                .is_some()
-        );
-        assert!(
-            body["components"]["schemas"]["NoteMetadata"]["properties"]
-                .get("backlinks")
-                .is_some()
-        );
     }
 
     #[tokio::test]
@@ -1781,18 +1451,5 @@ mod tests {
             assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
             assert_eq!(body["error"]["code"], "validation_error");
         }
-    }
-
-    #[tokio::test]
-    async fn swagger_ui_is_available() {
-        let response = send(
-            Request::builder()
-                .uri("/swagger-ui/")
-                .body(Body::empty())
-                .unwrap(),
-        )
-        .await;
-
-        assert_eq!(response.status(), StatusCode::OK);
     }
 }

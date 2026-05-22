@@ -84,6 +84,17 @@
 - git 操作必须串行执行，避免并发 git add、commit、merge、rebase、checkout、switch。
 - 执行 git checkout、git switch 或任何会改变当前分支的操作前，必须先运行 git worktree list，并确认当前 worktree 归属和目标分支占用情况。
 
+## 代码结构开发纪律
+
+- 禁止让单个生产代码文件持续膨胀；当文件超过约 600 行或同时承载多个长期职责时，新增功能前必须优先评估拆分模块边界。
+- 禁止让测试代码长期堆积在生产入口文件中；路由、集成、OpenAPI、CORS 等测试应按主题拆分到独立测试模块或 `tests/` 目录。
+- 禁止把仓储层写成全能对象；Repository 应聚焦单一聚合或持久化边界，不同时承担核心实体、关联关系、同步 outbox、payload 组装和校验等多类职责。
+- 禁止在单个函数中串联过多事务步骤；当函数同时处理主表写入、revision、tag、link、sync change 等流程时，应拆出命名清晰的私有 helper。
+- 禁止用超长 `match` 或条件分支承载多实体业务分发；按 entity type、operation 或业务子域拆分处理函数，保持每个函数只表达一个决策层级。
+- 禁止把 OpenAPI 标注体积当作 handler 膨胀的理由；当同一 handler 文件持续增加多个业务主题时，应按查询、写入、关联或领域边界拆分。
+- 新增 notes、sync、taxonomy 相关能力时，必须先检查现有文件体积和职责边界；如果改动会扩大已知大文件，必须同步提出拆分方案或在执行计划中记录技术债。
+- 重构大文件时必须保持外部 API 和行为稳定，优先做无行为变化的搬迁、命名和 helper 提取，并用现有测试覆盖回归风险。
+
 ## OpenAPI 维护规则
 
 - 新增或修改 HTTP handler 时，必须同步维护对应的 `#[utoipa::path]` 标注，声明 method、path、params、request_body、responses 和 tag。

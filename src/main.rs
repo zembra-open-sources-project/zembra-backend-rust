@@ -1,17 +1,5 @@
-mod api_doc;
-mod app;
-mod config;
-mod dto;
-mod error;
-mod handlers;
-mod logging;
-mod models;
-mod repositories;
-mod routes;
-mod services;
-mod sync;
-
 use std::net::SocketAddr;
+use zembra_backend_rust::{app, config, error, logging, repositories, services, sync};
 
 /// Starts the Zembra backend HTTP server.
 ///
