@@ -98,7 +98,7 @@
 
 ### Task #3: 拆分 sync 配置与 sync 操作测试
 
-**状态：** Coding
+**状态：** Finished
 
 **文件：**
 - 创建：`tests/sync_config_routes.rs`
@@ -109,6 +109,7 @@
 - 功能：把 sync config、sync status、manual sync 相关测试从 `src/app.rs` 拆出。
 - 实现说明：sync config 测试继续使用独立临时 toml 路径；禁止共享全局文件路径；对 disabled sync 的错误响应保留断言。
 - 预期验证结果：sync 相关路由测试独立运行稳定，不依赖 notes 路由测试顺序。
+- 完成记录：已新增 `tests/sync_config_routes.rs` 和 `tests/sync_routes.rs`，迁移 sync config、sync status、manual sync 相关测试，`src/app.rs` 不再包含测试模块。
 
 ---
 
