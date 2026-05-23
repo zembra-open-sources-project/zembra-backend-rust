@@ -18,7 +18,7 @@
 - 拆分 `src/app.rs` 中的路由集成测试。
 - 对 `src/repositories/notes.rs` 做第一层目录化，并拆出 tests、types、payloads、validation 支撑模块。
 - 保持外部 HTTP API、OpenAPI path、DTO 和数据库 schema 行为不变。
-- 剩余 notes/sync 生产代码拆分、typed payload 和 newtype 重组已拆分到 r022：`docs/exec-plans/active/r022-repository-structure-refactor.md`。
+- 剩余 notes/sync 生产代码拆分、typed payload 和 newtype 重组已拆分到 r022：`docs/exec-plans/completed/r022-repository-structure-refactor.md`。
 
 **非范围：**
 - 不修改业务功能语义。
@@ -115,7 +115,7 @@
 
 ## Phase #3: 拆分超大文件和长函数
 
-> 后续生产代码深拆已拆分到 r022：`docs/exec-plans/active/r022-repository-structure-refactor.md`。r021 只保留已完成的测试拆分和 notes 仓储第一层目录化记录。
+> 后续生产代码深拆已拆分到 r022：`docs/exec-plans/completed/r022-repository-structure-refactor.md`。r021 只保留已完成的测试拆分和 notes 仓储第一层目录化记录。
 
 ### Task #1: 将 notes 仓储拆成目录模块
 

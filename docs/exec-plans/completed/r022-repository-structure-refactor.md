@@ -241,7 +241,7 @@
 
 **文件：**
 - 修改：`docs/PROGRESS.md`
-- 修改：`docs/exec-plans/active/r022-repository-structure-refactor.md`
+- 修改：`docs/exec-plans/completed/r022-repository-structure-refactor.md`
 
 - 功能：记录 r022 执行进度和剩余风险。
 - 实现说明：完成阶段后更新任务状态；未经用户验收不移动到 completed。
