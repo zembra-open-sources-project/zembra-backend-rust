@@ -111,7 +111,7 @@
 
 ### Task #1: 将 sync 仓储迁移为目录模块
 
-**状态：** Designed
+**状态：** Finished
 
 **文件：**
 - 创建：`src/repositories/sync/mod.rs`
@@ -125,9 +125,12 @@
 - 实现说明：先做机械搬迁和 re-export，不改 SQL 和行为。
 - 预期结果：sync 目录结构建立，原 sync 测试通过。
 
+- 完成记录：已将 `src/repositories/sync.rs` 迁移为 `src/repositories/sync/mod.rs`，并拆出 `types.rs` 与 `tests.rs`，保持 `crate::repositories::sync::*` public 路径稳定。
+- 验证结果：`cargo test repositories::sync` 通过。
+
 ### Task #2: 拆分 sync state 和 outbox
 
-**状态：** Designed
+**状态：** Finished
 
 **文件：**
 - 创建：`src/repositories/sync/state.rs`
@@ -139,9 +142,12 @@
 - 实现说明：`state.rs` 负责 `get_or_create_state`、`record_success`、`record_error`、`list_states`；`outbox.rs` 负责 pending push、mark success、record change。
 - 预期结果：SyncRepository facade 委托清晰，外部调用不变。
 
+- 完成记录：已创建 `src/repositories/sync/state.rs` 和 `src/repositories/sync/outbox.rs`，分别承载 sync state cursor 和 pending push/outbox 写入相关 public facade。
+- 验证结果：`cargo test repositories::sync` 通过。
+
 ### Task #3: 拆分 sync remote apply
 
-**状态：** Designed
+**状态：** Finished
 
 **文件：**
 - 创建：`src/repositories/sync/apply.rs`
@@ -151,6 +157,9 @@
 - 功能：将 remote apply 从单个超长 match 拆成实体级函数。
 - 实现说明：先保持 string match 语义，再引入 enum 分发；每个实体函数只处理一种实体/操作组合。
 - 预期结果：remote apply 行为保持不变，新增实体不再扩展一个超长函数。
+
+- 完成记录：已创建 `src/repositories/sync/apply.rs`，迁移 remote apply public facade、实体/操作分发、schema conflict 记录、remote sync change 记录和 payload 字段读取 helper。
+- 验证结果：`cargo test repositories::sync`、`cargo fmt --check` 和 `cargo test --all-targets` 通过。
 
 ---
 
