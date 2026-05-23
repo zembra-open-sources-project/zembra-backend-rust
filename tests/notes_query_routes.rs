@@ -165,11 +165,7 @@ async fn daily_note_counts_route_returns_thirty_local_days_with_counts() {
     let state = support::app::test_state().await;
     let today = Local::now().date_naive();
     let yesterday = today - Duration::days(1);
-    let today_timestamp = Local
-        .from_local_datetime(&today.and_hms_opt(12, 0, 0).unwrap())
-        .single()
-        .unwrap()
-        .timestamp();
+    let today_timestamp = Local::now().timestamp();
     let yesterday_timestamp = Local
         .from_local_datetime(&yesterday.and_hms_opt(12, 0, 0).unwrap())
         .single()
@@ -266,15 +262,11 @@ async fn notes_by_date_route_returns_ordered_visible_notes_for_date() {
 
 #[tokio::test]
 async fn notes_by_date_route_filters_archived_and_deleted_notes() {
-    use chrono::{Local, TimeZone};
+    use chrono::Local;
 
     let state = support::app::test_state().await;
     let target_date = Local::now().date_naive();
-    let timestamp = Local
-        .from_local_datetime(&target_date.and_hms_opt(12, 0, 0).unwrap())
-        .single()
-        .unwrap()
-        .timestamp();
+    let timestamp = Local::now().timestamp();
     let visible = support::notes::create_note(&state, "visible").await;
     let archived = support::notes::create_note(&state, "archived").await;
     let deleted = support::notes::create_note(&state, "deleted").await;

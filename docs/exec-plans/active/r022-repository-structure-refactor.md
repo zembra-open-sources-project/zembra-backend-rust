@@ -22,7 +22,7 @@
 
 ### Task #1: 完成 notes core 模块拆分
 
-**状态：** Designed
+**状态：** Finished
 
 **文件：**
 - 创建：`src/repositories/notes/core.rs`
@@ -33,9 +33,12 @@
 - 实现说明：保持 `NotesRepository` public method 名称不变；`mod.rs` 只做 facade 委托；SQL 文本、bind 顺序、可见性过滤条件不变。
 - 预期结果：`src/repositories/notes/mod.rs` 明显变薄，notes 查询和 CRUD 行为保持不变。
 
+- 完成记录：已将原 `src/repositories/notes/mod.rs` 机械迁移为 `src/repositories/notes/core.rs`，新的 `mod.rs` 只保留模块声明、`NotesRepository` re-export、类型 re-export 和测试模块声明。
+- 验证结果：`cargo test repositories::notes` 通过。
+
 ### Task #2: 拆分 notes revisions 模块
 
-**状态：** Designed
+**状态：** Finished
 
 **文件：**
 - 创建：`src/repositories/notes/revisions.rs`
@@ -47,9 +50,12 @@
 - 实现说明：revision helper 使用 `pub(super)` 暴露给 core；保持 `note_revisions` 写入字段和 sync payload 语义不变。
 - 预期结果：创建和更新 note 的 revision 行为保持一致。
 
+- 完成记录：已创建 `src/repositories/notes/revisions.rs`，迁移 `list_note_revisions`，并将 revision 插入逻辑收敛为 `insert_note_revision_in_transaction`。
+- 验证结果：`cargo test repositories::notes` 通过。
+
 ### Task #3: 拆分 notes tags 模块
 
-**状态：** Designed
+**状态：** Finished
 
 **文件：**
 - 创建：`src/repositories/notes/tags.rs`
@@ -61,9 +67,12 @@
 - 实现说明：tag sync change 继续复用 `payloads.rs`；事务 helper 保持 `pub(super)`。
 - 预期结果：tag 关联、替换、移除和 sync outbox 行为保持一致。
 
+- 完成记录：已创建 `src/repositories/notes/tags.rs`，迁移 tag 查询、添加、移除和替换逻辑，保留 note_tag sync payload 和 attach/detach 语义。
+- 验证结果：`cargo test repositories::notes` 通过。
+
 ### Task #4: 拆分 notes links 模块
 
-**状态：** Designed
+**状态：** Finished
 
 **文件：**
 - 创建：`src/repositories/notes/links.rs`
@@ -75,9 +84,12 @@
 - 实现说明：link 校验继续只允许可见目标 note，保持自引用拒绝和 sync change attach/detach 语义。
 - 预期结果：note links API 和仓储测试保持通过。
 
+- 完成记录：已创建 `src/repositories/notes/links.rs`，迁移 outgoing links、backlinks、link insert/replace/select 相关逻辑。
+- 验证结果：`cargo test repositories::notes` 通过。
+
 ### Task #5: 拆分 `create_note_in_transaction` 与 `update_note`
 
-**状态：** Designed
+**状态：** Finished
 
 **文件：**
 - 修改：`src/repositories/notes/core.rs`
@@ -89,6 +101,9 @@
 - 功能：把创建和更新流程拆成命名清晰的事务步骤。
 - 实现说明：提取 `insert_note_row`、`update_note_row`、`record_note_insert_change`、`record_note_update_change`、`record_revision_insert_change` 等 helper。
 - 预期结果：长函数缩短，事务流程仍由 core 编排。
+
+- 完成记录：已提取 `insert_note_row_in_transaction`、`update_note_row_in_transaction`，并让 revision、tag、link 事务步骤委托给对应子模块 helper。
+- 验证结果：`cargo test repositories::notes`、`cargo fmt --check` 和 `cargo test --all-targets` 通过。
 
 ---
 
