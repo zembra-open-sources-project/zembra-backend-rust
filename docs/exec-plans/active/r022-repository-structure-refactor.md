@@ -167,7 +167,7 @@
 
 ### Task #1: 引入 sync typed payload
 
-**状态：** Designed
+**状态：** Finished
 
 **文件：**
 - 创建：`src/repositories/sync/payload.rs`
@@ -178,9 +178,12 @@
 - 实现说明：为 field、tag、note、note_revision、note_tag、note_link 定义 payload struct，并实现 `TryFrom<&serde_json::Value>`。
 - 预期结果：apply 逻辑不再散落 JSON 字段读取。
 
+- 完成记录：已创建 `src/repositories/sync/payload.rs`，为 field、tag、note、note_revision、note_tag、note_link 定义 typed payload，并将 JSON 字段读取 helper 收敛到 payload 模块。
+- 验证结果：`cargo test repositories::sync` 通过。
+
 ### Task #2: 引入 remote entity/operation enum
 
-**状态：** Designed
+**状态：** Finished
 
 **文件：**
 - 修改：`src/repositories/sync/apply.rs`
@@ -191,9 +194,12 @@
 - 实现说明：实现 `TryFrom<&SyncChangeRecord>`，未知组合继续返回现有 unsupported 错误语义。
 - 预期结果：remote apply 分发清晰，错误语义不变。
 
+- 完成记录：已在 `src/repositories/sync/types.rs` 引入 `RemoteEntityKind`、`RemoteOperation` 和 `RemoteChangeKind`，`apply.rs` 改为基于 typed dispatch 分发，保留 unsupported remote change 错误语义。
+- 验证结果：`cargo test repositories::sync` 通过。
+
 ### Task #3: notes/sync 私有 newtype 试点
 
-**状态：** Designed
+**状态：** Finished
 
 **文件：**
 - 创建：`src/repositories/notes/ids.rs`
@@ -205,6 +211,9 @@
 - 功能：在私有 helper 和事务边界使用 `NoteId`、`NoteRef`、`RevisionId`、`SyncEntityId` 等 newtype。
 - 实现说明：不修改 DTO/model public 字段；通过 `AsRef<str>` 或显式 accessor 降低调用噪音。
 - 预期结果：关键 helper 签名表达力增强，外部 API 不变。
+
+- 完成记录：已创建 `src/repositories/notes/ids.rs` 和 `src/repositories/sync/ids.rs`，在 notes 私有 row helper 和 sync winner revision helper 中试点 `NoteId`、`RevisionId`、`SyncEntityId`。
+- 验证结果：`cargo test repositories::notes`、`cargo test repositories::sync` 和 `cargo fmt --check` 通过。
 
 ---
 

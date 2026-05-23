@@ -1,6 +1,12 @@
 use serde_json::Value;
 use sqlx::{Sqlite, Transaction};
 
+use super::ids::SyncEntityId;
+use super::payload::{
+    FieldPayload, NoteLinkAttachPayload, NoteLinkDetachPayload, NotePayload, NoteRevisionPayload,
+    NoteTagPayload, TagPayload,
+};
+use super::types::{RemoteChangeKind, RemoteEntityKind, RemoteOperation};
 use super::{SyncChangeRecord, SyncRepository};
 use crate::repositories::taxonomy::{DEFAULT_WORKSPACE_ID, new_id};
 
@@ -163,32 +169,43 @@ async fn apply_remote_change_in_transaction(
     change: &SyncChangeRecord,
     payload: &Value,
 ) -> Result<(), String> {
-    match (change.entity_type.as_str(), change.operation.as_str()) {
-        ("field", "insert") => {
+    let kind = RemoteChangeKind::try_from(change)?;
+
+    match (kind.entity, kind.operation) {
+        (RemoteEntityKind::Field, RemoteOperation::Insert) => {
+            let payload = FieldPayload::try_from(payload)?;
             sqlx::query(
                 "INSERT OR IGNORE INTO fields (id, workspace_id, name, created_at) VALUES (?, ?, ?, ?)",
             )
-            .bind(required_text(payload, "id")?)
+            .bind(payload.id)
             .bind(DEFAULT_WORKSPACE_ID)
-            .bind(required_text(payload, "name")?)
-            .bind(required_i64(payload, "created_at")?)
+            .bind(payload.name)
+            .bind(payload.created_at)
             .execute(&mut **transaction)
             .await
             .map_err(|error| error.to_string())?;
         }
-        ("tag", "insert") => {
+        (RemoteEntityKind::Tag, RemoteOperation::Insert) => {
+            let payload = TagPayload::try_from(payload)?;
             sqlx::query(
                 "INSERT OR IGNORE INTO tags (id, workspace_id, name, created_at) VALUES (?, ?, ?, ?)",
             )
-            .bind(required_text(payload, "id")?)
+            .bind(payload.id)
             .bind(DEFAULT_WORKSPACE_ID)
-            .bind(required_text(payload, "name")?)
-            .bind(required_i64(payload, "created_at")?)
+            .bind(payload.name)
+            .bind(payload.created_at)
             .execute(&mut **transaction)
             .await
             .map_err(|error| error.to_string())?;
         }
-        ("note", "insert" | "update" | "delete" | "restore") => {
+        (
+            RemoteEntityKind::Note,
+            RemoteOperation::Insert
+            | RemoteOperation::Update
+            | RemoteOperation::Delete
+            | RemoteOperation::Restore,
+        ) => {
+            let payload = NotePayload::try_from(payload)?;
             sqlx::query(
                 "INSERT INTO notes \
                  (id, workspace_id, content, role, field_id, created_at, updated_at, archived_at, deleted_at, current_revision_id, conflict_status) \
@@ -197,84 +214,89 @@ async fn apply_remote_change_in_transaction(
                  content = excluded.content, role = excluded.role, field_id = excluded.field_id, updated_at = excluded.updated_at, \
                  archived_at = excluded.archived_at, deleted_at = excluded.deleted_at, current_revision_id = excluded.current_revision_id",
             )
-            .bind(required_text(payload, "id")?)
+            .bind(payload.id)
             .bind(DEFAULT_WORKSPACE_ID)
-            .bind(required_text(payload, "content")?)
-            .bind(required_text(payload, "role")?)
-            .bind(optional_text(payload, "field_id"))
-            .bind(required_i64(payload, "created_at")?)
-            .bind(required_i64(payload, "updated_at")?)
-            .bind(optional_i64(payload, "archived_at"))
-            .bind(optional_i64(payload, "deleted_at"))
-            .bind(optional_text(payload, "current_revision_id"))
+            .bind(payload.content)
+            .bind(payload.role)
+            .bind(payload.field_id)
+            .bind(payload.created_at)
+            .bind(payload.updated_at)
+            .bind(payload.archived_at)
+            .bind(payload.deleted_at)
+            .bind(payload.current_revision_id)
             .execute(&mut **transaction)
             .await
             .map_err(|error| error.to_string())?;
         }
-        ("note_revision", "insert") => {
+        (RemoteEntityKind::NoteRevision, RemoteOperation::Insert) => {
+            let payload = NoteRevisionPayload::try_from(payload)?;
             sqlx::query(
                 "INSERT OR IGNORE INTO note_revisions \
                  (id, workspace_id, note_id, content, title, device_id, created_at, base_revision_id, change_id) \
                  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
             )
-            .bind(required_text(payload, "id")?)
+            .bind(payload.id)
             .bind(DEFAULT_WORKSPACE_ID)
-            .bind(required_text(payload, "note_id")?)
-            .bind(required_text(payload, "content")?)
-            .bind(optional_text(payload, "title"))
-            .bind(optional_text(payload, "device_id"))
-            .bind(required_i64(payload, "created_at")?)
-            .bind(optional_text(payload, "base_revision_id"))
+            .bind(payload.note_id)
+            .bind(payload.content)
+            .bind(payload.title)
+            .bind(payload.device_id)
+            .bind(payload.created_at)
+            .bind(payload.base_revision_id)
             .bind(&change.id)
             .execute(&mut **transaction)
             .await
             .map_err(|error| error.to_string())?;
-            refresh_note_winner_revision(transaction, required_text(payload, "note_id")?).await?;
+            refresh_note_winner_revision(transaction, SyncEntityId::new(payload.note_id)).await?;
         }
-        ("note_tag", "attach") => {
+        (RemoteEntityKind::NoteTag, RemoteOperation::Attach) => {
+            let payload = NoteTagPayload::try_from(payload)?;
             sqlx::query(
                 "INSERT OR IGNORE INTO note_tags (workspace_id, note_id, tag_id, created_at) VALUES (?, ?, ?, COALESCE(?, unixepoch()))",
             )
             .bind(DEFAULT_WORKSPACE_ID)
-            .bind(required_text(payload, "note_id")?)
-            .bind(required_text(payload, "tag_id")?)
-            .bind(optional_i64(payload, "created_at"))
+            .bind(payload.note_id)
+            .bind(payload.tag_id)
+            .bind(payload.created_at)
             .execute(&mut **transaction)
             .await
             .map_err(|error| error.to_string())?;
         }
-        ("note_tag", "detach") => {
+        (RemoteEntityKind::NoteTag, RemoteOperation::Detach) => {
+            let payload = NoteTagPayload::try_from(payload)?;
             sqlx::query(
                 "DELETE FROM note_tags WHERE workspace_id = ? AND note_id = ? AND tag_id = ?",
             )
             .bind(DEFAULT_WORKSPACE_ID)
-            .bind(required_text(payload, "note_id")?)
-            .bind(required_text(payload, "tag_id")?)
+            .bind(payload.note_id)
+            .bind(payload.tag_id)
             .execute(&mut **transaction)
             .await
             .map_err(|error| error.to_string())?;
         }
-        ("note_link", "attach") => {
+        (RemoteEntityKind::NoteLink, RemoteOperation::Attach) => {
+            let payload = NoteLinkAttachPayload::try_from(payload)?;
             sqlx::query(
                 "INSERT OR IGNORE INTO note_links \
                  (id, workspace_id, source_note_id, target_note_id, anchor_text, position, created_at) \
                  VALUES (?, ?, ?, ?, ?, ?, COALESCE(?, unixepoch()))",
             )
-            .bind(required_text(payload, "id")?)
+            .bind(payload.id)
             .bind(DEFAULT_WORKSPACE_ID)
-            .bind(required_text(payload, "source_note_id")?)
-            .bind(required_text(payload, "target_note_id")?)
-            .bind(optional_text(payload, "anchor_text"))
-            .bind(optional_i64(payload, "position"))
-            .bind(optional_i64(payload, "created_at"))
+            .bind(payload.source_note_id)
+            .bind(payload.target_note_id)
+            .bind(payload.anchor_text)
+            .bind(payload.position)
+            .bind(payload.created_at)
             .execute(&mut **transaction)
             .await
             .map_err(|error| error.to_string())?;
         }
-        ("note_link", "detach") => {
+        (RemoteEntityKind::NoteLink, RemoteOperation::Detach) => {
+            let payload = NoteLinkDetachPayload::try_from(payload)?;
             sqlx::query("DELETE FROM note_links WHERE workspace_id = ? AND id = ?")
                 .bind(DEFAULT_WORKSPACE_ID)
-                .bind(required_text(payload, "id")?)
+                .bind(payload.id)
                 .execute(&mut **transaction)
                 .await
                 .map_err(|error| error.to_string())?;
@@ -302,8 +324,9 @@ async fn apply_remote_change_in_transaction(
 /// Returns `Ok(())` after updating the note.
 async fn refresh_note_winner_revision(
     transaction: &mut Transaction<'_, Sqlite>,
-    note_id: &str,
+    note_id: SyncEntityId<'_>,
 ) -> Result<(), String> {
+    let note_id = note_id.as_str();
     let winner = sqlx::query_scalar::<_, String>(
         "SELECT id FROM note_revisions \
          WHERE workspace_id = ? AND note_id = ? \
@@ -360,67 +383,4 @@ async fn record_schema_conflict_in_transaction(
     .await?;
 
     Ok(())
-}
-
-/// Reads a required string field from payload.
-///
-/// # Arguments
-///
-/// * `payload` - JSON payload to inspect.
-/// * `field` - Field name to read.
-///
-/// # Returns
-///
-/// Returns the field value or an error message.
-fn required_text<'a>(payload: &'a Value, field: &str) -> Result<&'a str, String> {
-    payload
-        .get(field)
-        .and_then(Value::as_str)
-        .filter(|value| !value.trim().is_empty())
-        .ok_or_else(|| format!("missing text field {field}"))
-}
-
-/// Reads an optional string field from payload.
-///
-/// # Arguments
-///
-/// * `payload` - JSON payload to inspect.
-/// * `field` - Field name to read.
-///
-/// # Returns
-///
-/// Returns the optional field value.
-fn optional_text<'a>(payload: &'a Value, field: &str) -> Option<&'a str> {
-    payload.get(field).and_then(Value::as_str)
-}
-
-/// Reads a required integer field from payload.
-///
-/// # Arguments
-///
-/// * `payload` - JSON payload to inspect.
-/// * `field` - Field name to read.
-///
-/// # Returns
-///
-/// Returns the field value or an error message.
-fn required_i64(payload: &Value, field: &str) -> Result<i64, String> {
-    payload
-        .get(field)
-        .and_then(Value::as_i64)
-        .ok_or_else(|| format!("missing integer field {field}"))
-}
-
-/// Reads an optional integer field from payload.
-///
-/// # Arguments
-///
-/// * `payload` - JSON payload to inspect.
-/// * `field` - Field name to read.
-///
-/// # Returns
-///
-/// Returns the optional field value.
-fn optional_i64(payload: &Value, field: &str) -> Option<i64> {
-    payload.get(field).and_then(Value::as_i64)
 }

@@ -1,3 +1,4 @@
+use super::ids::{NoteId, RevisionId};
 use super::links::{insert_note_links_in_transaction, replace_note_links_in_transaction};
 use super::payloads::note_payload;
 use super::revisions::insert_note_revision_in_transaction;
@@ -437,8 +438,8 @@ impl NotesRepository {
 
         update_note_row_in_transaction(
             &mut transaction,
-            &note.id,
-            &revision_id,
+            NoteId::new(&note.id),
+            RevisionId::new(&revision_id),
             &input,
             field.as_ref(),
         )
@@ -614,8 +615,14 @@ async fn create_note_in_transaction(
     let note_id = new_id();
     let revision_id = new_id();
 
-    insert_note_row_in_transaction(transaction, &note_id, &revision_id, &input, field.as_ref())
-        .await?;
+    insert_note_row_in_transaction(
+        transaction,
+        NoteId::new(&note_id),
+        RevisionId::new(&revision_id),
+        &input,
+        field.as_ref(),
+    )
+    .await?;
 
     insert_note_revision_in_transaction(
         transaction,
@@ -702,8 +709,8 @@ async fn create_note_in_transaction(
 /// Returns `Ok(())` after the note row is inserted.
 async fn insert_note_row_in_transaction(
     transaction: &mut Transaction<'_, Sqlite>,
-    note_id: &str,
-    revision_id: &str,
+    note_id: NoteId<'_>,
+    revision_id: RevisionId<'_>,
     input: &CreateNoteInput,
     field: Option<&FieldRecord>,
 ) -> Result<(), sqlx::Error> {
@@ -712,12 +719,12 @@ async fn insert_note_row_in_transaction(
          (id, workspace_id, content, role, field_id, created_at, updated_at, archived_at, deleted_at, current_revision_id) \
          VALUES (?, ?, ?, ?, ?, unixepoch(), unixepoch(), NULL, NULL, ?)",
     )
-    .bind(note_id)
+    .bind(note_id.as_str())
     .bind(DEFAULT_WORKSPACE_ID)
     .bind(&input.content)
     .bind(&input.role)
     .bind(field.map(|field| field.id.as_str()))
-    .bind(revision_id)
+    .bind(revision_id.as_str())
     .execute(&mut **transaction)
     .await?;
 
@@ -739,8 +746,8 @@ async fn insert_note_row_in_transaction(
 /// Returns `Ok(())` after the note row is updated.
 async fn update_note_row_in_transaction(
     transaction: &mut Transaction<'_, Sqlite>,
-    note_id: &str,
-    revision_id: &str,
+    note_id: NoteId<'_>,
+    revision_id: RevisionId<'_>,
     input: &UpdateNoteInput,
     field: Option<&FieldRecord>,
 ) -> Result<(), sqlx::Error> {
@@ -751,9 +758,9 @@ async fn update_note_row_in_transaction(
             )
             .bind(&input.content)
             .bind(&field.id)
-            .bind(revision_id)
+            .bind(revision_id.as_str())
             .bind(DEFAULT_WORKSPACE_ID)
-            .bind(note_id)
+            .bind(note_id.as_str())
             .execute(&mut **transaction)
             .await?;
         }
@@ -762,9 +769,9 @@ async fn update_note_row_in_transaction(
                 "UPDATE notes SET content = ?, updated_at = unixepoch(), current_revision_id = ? WHERE workspace_id = ? AND id = ?",
             )
             .bind(&input.content)
-            .bind(revision_id)
+            .bind(revision_id.as_str())
             .bind(DEFAULT_WORKSPACE_ID)
-            .bind(note_id)
+            .bind(note_id.as_str())
             .execute(&mut **transaction)
             .await?;
         }
