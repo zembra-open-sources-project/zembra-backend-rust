@@ -221,7 +221,7 @@
 
 ### Task #1: 全量验证
 
-**状态：** Designed
+**状态：** Finished
 
 **文件：**
 - 验证：`cargo fmt --check`
@@ -232,9 +232,12 @@
 - 实现说明：先跑定向仓储测试，再跑全量测试；如 clippy 暴露历史问题，只记录非本次引入项。
 - 预期结果：格式检查和测试通过。
 
+- 完成记录：最终验证已按可执行命令完成；计划中的 `cargo test repositories::notes repositories::sync` 拆分为 `cargo test repositories::notes` 与 `cargo test repositories::sync` 执行。
+- 验证结果：`cargo fmt --check`、`cargo test repositories::notes`、`cargo test repositories::sync` 和 `cargo test --all-targets` 通过。
+
 ### Task #2: 更新进度记录
 
-**状态：** Designed
+**状态：** Finished
 
 **文件：**
 - 修改：`docs/PROGRESS.md`
@@ -243,3 +246,6 @@
 - 功能：记录 r022 执行进度和剩余风险。
 - 实现说明：完成阶段后更新任务状态；未经用户验收不移动到 completed。
 - 预期结果：进度文档能反映 r022 当前状态。
+
+- 完成记录：已更新本执行计划和 `docs/PROGRESS.md`，记录 r022 仓储结构重构完成情况和验证结果。
+- 验证结果：文档记录已写回；执行计划仍保留在 active，等待用户验收后再归档。
