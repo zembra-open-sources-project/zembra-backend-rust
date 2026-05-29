@@ -7,7 +7,7 @@ use crate::dto::notes::{
     BatchCreateNotesResponse, CreateNoteRequest, DailyNoteCount, DailyNoteCountsResponse,
     FieldNotesGroup, FieldNotesResponse, NoteMetadata, NoteResponse, NotesByDateQuery,
     NotesByDateResponse, RandomFieldsQuery, RandomNotesQuery, RandomTagsQuery, RecentNotesRequest,
-    TaggedNotesGroup, TaggedNotesResponse, UpdateNoteRequest,
+    RecentNotesRoleFilter, TaggedNotesGroup, TaggedNotesResponse, UpdateNoteRequest,
 };
 use crate::error::ApiError;
 use crate::models::note::NoteRecord;
@@ -116,8 +116,9 @@ impl NotesService {
         request: RecentNotesRequest,
     ) -> Result<Vec<NoteRecord>, ApiError> {
         let limit = request.limit.unwrap_or(50);
+        let role_filter = RecentNotesRoleFilter::from_request(request.role.as_deref())?;
         self.repository
-            .list_recent_notes(limit, request.note_uuid.as_deref())
+            .list_recent_notes(limit, request.note_uuid.as_deref(), role_filter)
             .await
     }
 

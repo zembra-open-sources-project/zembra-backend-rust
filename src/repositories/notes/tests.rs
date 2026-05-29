@@ -1,4 +1,5 @@
 use super::{CreateNoteInput, NoteLinkInput, NotesRepository, UpdateNoteInput};
+use crate::dto::notes::RecentNotesRoleFilter;
 use crate::error::ApiError;
 use crate::repositories::database::Database;
 use crate::repositories::sync::list_sync_changes;
@@ -52,6 +53,23 @@ fn input(content: &str) -> CreateNoteInput {
         role: "Human".to_string(),
         device_id: None,
         links: Vec::new(),
+    }
+}
+
+/// Builds a note creation input with a specific role.
+///
+/// # Arguments
+///
+/// * `content` - Note body content.
+/// * `role` - Stored note creator role.
+///
+/// # Returns
+///
+/// Returns a note creation input for the role.
+fn input_with_role(content: &str, role: &str) -> CreateNoteInput {
+    CreateNoteInput {
+        role: role.to_string(),
+        ..input(content)
     }
 }
 
@@ -616,7 +634,10 @@ async fn list_recent_notes_orders_and_filters_hidden_records() {
     repository.archive_note(&archived.note.id).await.unwrap();
     repository.delete_note(&deleted.note.id).await.unwrap();
 
-    let recent = repository.list_recent_notes(10, None).await.unwrap();
+    let recent = repository
+        .list_recent_notes(10, None, RecentNotesRoleFilter::Both)
+        .await
+        .unwrap();
 
     assert_eq!(
         recent
@@ -633,9 +654,125 @@ async fn list_recent_notes_applies_limit() {
     repository.create_note(input("first")).await.unwrap();
     repository.create_note(input("second")).await.unwrap();
 
-    let recent = repository.list_recent_notes(1, None).await.unwrap();
+    let recent = repository
+        .list_recent_notes(1, None, RecentNotesRoleFilter::Both)
+        .await
+        .unwrap();
 
     assert_eq!(recent.len(), 1);
+}
+
+#[tokio::test]
+async fn list_recent_notes_filters_by_role() {
+    let repository = notes_repository().await;
+    let human_old = repository
+        .create_note(input_with_role("human old", "Human"))
+        .await
+        .unwrap();
+    let agent = repository
+        .create_note(input_with_role("agent", "Agent"))
+        .await
+        .unwrap();
+    let human_new = repository
+        .create_note(input_with_role("human new", "Human"))
+        .await
+        .unwrap();
+
+    sqlx::query("UPDATE notes SET updated_at = ? WHERE id = ?")
+        .bind(2_000_000_010_i64)
+        .bind(&human_old.note.id)
+        .execute(&repository.pool)
+        .await
+        .unwrap();
+    sqlx::query("UPDATE notes SET updated_at = ? WHERE id = ?")
+        .bind(2_000_000_020_i64)
+        .bind(&agent.note.id)
+        .execute(&repository.pool)
+        .await
+        .unwrap();
+    sqlx::query("UPDATE notes SET updated_at = ? WHERE id = ?")
+        .bind(2_000_000_030_i64)
+        .bind(&human_new.note.id)
+        .execute(&repository.pool)
+        .await
+        .unwrap();
+
+    let humans = repository
+        .list_recent_notes(10, None, RecentNotesRoleFilter::Human)
+        .await
+        .unwrap();
+    let agents = repository
+        .list_recent_notes(10, None, RecentNotesRoleFilter::Agent)
+        .await
+        .unwrap();
+    let both = repository
+        .list_recent_notes(10, None, RecentNotesRoleFilter::Both)
+        .await
+        .unwrap();
+
+    assert_eq!(
+        humans
+            .iter()
+            .map(|note| note.content.as_str())
+            .collect::<Vec<_>>(),
+        vec!["human new", "human old"]
+    );
+    assert_eq!(
+        agents
+            .iter()
+            .map(|note| note.content.as_str())
+            .collect::<Vec<_>>(),
+        vec!["agent"]
+    );
+    assert_eq!(
+        both.iter()
+            .map(|note| note.content.as_str())
+            .collect::<Vec<_>>(),
+        vec!["human new", "agent", "human old"]
+    );
+}
+
+#[tokio::test]
+async fn list_recent_notes_applies_role_filter_with_limit_and_cursor() {
+    let repository = notes_repository().await;
+    let human_old = repository
+        .create_note(input_with_role("human old", "Human"))
+        .await
+        .unwrap();
+    let agent_between = repository
+        .create_note(input_with_role("agent between", "Agent"))
+        .await
+        .unwrap();
+    let human_cursor = repository
+        .create_note(input_with_role("human cursor", "Human"))
+        .await
+        .unwrap();
+    let human_new = repository
+        .create_note(input_with_role("human new", "Human"))
+        .await
+        .unwrap();
+
+    for (note_id, updated_at) in [
+        (&human_old.note.id, 2_000_000_010_i64),
+        (&agent_between.note.id, 2_000_000_020_i64),
+        (&human_cursor.note.id, 2_000_000_030_i64),
+        (&human_new.note.id, 2_000_000_040_i64),
+    ] {
+        sqlx::query("UPDATE notes SET updated_at = ? WHERE id = ?")
+            .bind(updated_at)
+            .bind(note_id)
+            .execute(&repository.pool)
+            .await
+            .unwrap();
+    }
+
+    let humans = repository
+        .list_recent_notes(1, Some(&human_cursor.note.id), RecentNotesRoleFilter::Human)
+        .await
+        .unwrap();
+
+    assert_eq!(humans.len(), 1);
+    assert_eq!(humans[0].content, "human old");
 }
 
 #[tokio::test]
@@ -665,7 +802,7 @@ async fn list_recent_notes_uses_full_note_uuid_cursor() {
         .unwrap();
 
     let recent = repository
-        .list_recent_notes(10, Some(&cursor.note.id))
+        .list_recent_notes(10, Some(&cursor.note.id), RecentNotesRoleFilter::Both)
         .await
         .unwrap();
 
@@ -708,7 +845,11 @@ async fn list_recent_notes_uses_id_tiebreaker_for_cursor() {
         .unwrap();
 
     let recent = repository
-        .list_recent_notes(10, Some("20000000000000000000000000000000"))
+        .list_recent_notes(
+            10,
+            Some("20000000000000000000000000000000"),
+            RecentNotesRoleFilter::Both,
+        )
         .await
         .unwrap();
 
@@ -727,12 +868,18 @@ async fn list_recent_notes_rejects_invalid_or_hidden_cursor() {
     let archived = repository.create_note(input("archived")).await.unwrap();
     repository.archive_note(&archived.note.id).await.unwrap();
 
-    let invalid = repository.list_recent_notes(10, Some("abcd")).await;
+    let invalid = repository
+        .list_recent_notes(10, Some("abcd"), RecentNotesRoleFilter::Both)
+        .await;
     let hidden = repository
-        .list_recent_notes(10, Some(&archived.note.id))
+        .list_recent_notes(10, Some(&archived.note.id), RecentNotesRoleFilter::Both)
         .await;
     let missing = repository
-        .list_recent_notes(10, Some("ffffffffffffffffffffffffffffffff"))
+        .list_recent_notes(
+            10,
+            Some("ffffffffffffffffffffffffffffffff"),
+            RecentNotesRoleFilter::Both,
+        )
         .await;
 
     assert!(matches!(invalid, Err(ApiError::Validation)));

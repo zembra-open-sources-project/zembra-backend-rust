@@ -48,6 +48,11 @@ async fn openapi_json_lists_runtime_api_paths() {
             .is_some()
     );
     assert!(
+        body["components"]["schemas"]["RecentNotesRequest"]["properties"]
+            .get("role")
+            .is_some()
+    );
+    assert!(
         body["components"]["schemas"]["UpdateNoteRequest"]["properties"]
             .get("links")
             .is_some()

@@ -64,6 +64,109 @@ async fn recent_notes_route_uses_default_and_custom_limit() {
 }
 
 #[tokio::test]
+async fn recent_notes_route_filters_by_role() {
+    let state = support::app::test_state().await;
+    support::notes::TestNoteBuilder::new("human old")
+        .role("Human")
+        .create(&state)
+        .await;
+    support::notes::TestNoteBuilder::new("agent")
+        .role("Agent")
+        .create(&state)
+        .await;
+    support::notes::TestNoteBuilder::new("human new")
+        .role("Human")
+        .create(&state)
+        .await;
+
+    let response = support::app::send_with_state(
+        state,
+        Request::builder()
+            .method("POST")
+            .uri("/notes/recent")
+            .header("content-type", "application/json")
+            .body(Body::from(json!({ "role": "human" }).to_string()))
+            .unwrap(),
+    )
+    .await;
+    let status = response.status();
+    let body = support::app::response_json(response).await;
+
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["notes"].as_array().unwrap().len(), 2);
+    assert!(
+        body["notes"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|note| note["role"] == "Human")
+    );
+}
+
+#[tokio::test]
+async fn recent_notes_route_accepts_role_case_insensitively_and_both() {
+    let state = support::app::test_state().await;
+    support::notes::TestNoteBuilder::new("human")
+        .role("Human")
+        .create(&state)
+        .await;
+    support::notes::TestNoteBuilder::new("agent")
+        .role("Agent")
+        .create(&state)
+        .await;
+
+    let agent_response = support::app::send_with_state(
+        state.clone(),
+        Request::builder()
+            .method("POST")
+            .uri("/notes/recent")
+            .header("content-type", "application/json")
+            .body(Body::from(json!({ "role": "AGENT" }).to_string()))
+            .unwrap(),
+    )
+    .await;
+    let agent_status = agent_response.status();
+    let agent_body = support::app::response_json(agent_response).await;
+
+    let both_response = support::app::send_with_state(
+        state,
+        Request::builder()
+            .method("POST")
+            .uri("/notes/recent")
+            .header("content-type", "application/json")
+            .body(Body::from(json!({ "role": "Both" }).to_string()))
+            .unwrap(),
+    )
+    .await;
+    let both_status = both_response.status();
+    let both_body = support::app::response_json(both_response).await;
+
+    assert_eq!(agent_status, StatusCode::OK);
+    assert_eq!(agent_body["notes"].as_array().unwrap().len(), 1);
+    assert_eq!(agent_body["notes"][0]["role"], "Agent");
+    assert_eq!(both_status, StatusCode::OK);
+    assert_eq!(both_body["notes"].as_array().unwrap().len(), 2);
+}
+
+#[tokio::test]
+async fn recent_notes_route_rejects_invalid_role() {
+    let response = support::app::send(
+        Request::builder()
+            .method("POST")
+            .uri("/notes/recent")
+            .header("content-type", "application/json")
+            .body(Body::from(json!({ "role": "robot" }).to_string()))
+            .unwrap(),
+    )
+    .await;
+    let status = response.status();
+    let body = support::app::response_json(response).await;
+
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+    assert_eq!(body["error"]["code"], "validation_error");
+}
+
+#[tokio::test]
 async fn recent_notes_route_uses_note_uuid_cursor() {
     let state = support::app::test_state().await;
     let old = support::notes::create_note(&state, "old").await;

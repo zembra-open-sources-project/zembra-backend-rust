@@ -69,6 +69,20 @@ impl TestNoteBuilder {
         self
     }
 
+    /// Sets the note creator role under construction.
+    ///
+    /// # Arguments
+    ///
+    /// * `role` - Role value to send in the create-note request.
+    ///
+    /// # Returns
+    ///
+    /// Returns the updated builder.
+    pub fn role(mut self, role: impl Into<String>) -> Self {
+        self.role = role.into();
+        self
+    }
+
     /// Adds an outgoing note link to the note under construction.
     ///
     /// # Arguments

@@ -8,6 +8,7 @@ use super::validation::{validate_full_note_uuid, validate_note_ref};
 
 use sqlx::{Sqlite, SqlitePool, Transaction};
 
+use crate::dto::notes::RecentNotesRoleFilter;
 use crate::error::ApiError;
 use crate::models::field::FieldRecord;
 use crate::models::note::NoteRecord;
@@ -117,9 +118,34 @@ impl NotesRepository {
         &self,
         limit: i64,
         note_uuid: Option<&str>,
+        role_filter: RecentNotesRoleFilter,
     ) -> Result<Vec<NoteRecord>, ApiError> {
-        match note_uuid {
-            Some(note_uuid) => {
+        match (note_uuid, role_filter.stored_role()) {
+            (Some(note_uuid), Some(role)) => {
+                validate_full_note_uuid(note_uuid)?;
+                let cursor = self.get_visible_note_by_id(note_uuid).await?;
+
+                sqlx::query_as::<_, NoteRecord>(
+                    "SELECT id, content, role, field_id, created_at, updated_at, archived_at, deleted_at, current_revision_id \
+                     FROM notes \
+                     WHERE workspace_id = ? \
+                     AND deleted_at IS NULL \
+                     AND archived_at IS NULL \
+                     AND role = ? \
+                     AND (updated_at < ? OR (updated_at = ? AND id < ?)) \
+                     ORDER BY updated_at DESC, id DESC LIMIT ?",
+                )
+                .bind(DEFAULT_WORKSPACE_ID)
+                .bind(role)
+                .bind(cursor.updated_at)
+                .bind(cursor.updated_at)
+                .bind(&cursor.id)
+                .bind(limit)
+                .fetch_all(&self.pool)
+                .await
+                .map_err(ApiError::from)
+            }
+            (Some(note_uuid), None) => {
                 validate_full_note_uuid(note_uuid)?;
                 let cursor = self.get_visible_note_by_id(note_uuid).await?;
 
@@ -141,7 +167,17 @@ impl NotesRepository {
                 .await
                 .map_err(ApiError::from)
             }
-            None => sqlx::query_as::<_, NoteRecord>(
+            (None, Some(role)) => sqlx::query_as::<_, NoteRecord>(
+                "SELECT id, content, role, field_id, created_at, updated_at, archived_at, deleted_at, current_revision_id \
+                 FROM notes WHERE workspace_id = ? AND deleted_at IS NULL AND archived_at IS NULL AND role = ? ORDER BY updated_at DESC, id DESC LIMIT ?",
+            )
+            .bind(DEFAULT_WORKSPACE_ID)
+            .bind(role)
+            .bind(limit)
+            .fetch_all(&self.pool)
+            .await
+            .map_err(ApiError::from),
+            (None, None) => sqlx::query_as::<_, NoteRecord>(
                 "SELECT id, content, role, field_id, created_at, updated_at, archived_at, deleted_at, current_revision_id \
                  FROM notes WHERE workspace_id = ? AND deleted_at IS NULL AND archived_at IS NULL ORDER BY updated_at DESC, id DESC LIMIT ?",
             )

@@ -24,6 +24,8 @@ pub struct RecentNotesRequest {
     /// Optional full note ID used as a pagination cursor.
     #[validate(length(equal = 32), custom(function = "validate_hex_note_uuid"))]
     pub note_uuid: Option<String>,
+    /// Optional note creator role filter.
+    pub role: Option<String>,
 }
 
 /// Query parameters used by the random tags endpoint.
@@ -232,6 +234,50 @@ pub struct UpdateNoteRequest {
     /// Optional replacement outgoing links; absent keeps current links.
     #[validate(nested)]
     pub links: Option<Vec<NoteLinkRequest>>,
+}
+
+/// Filter for recent notes by creator role.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RecentNotesRoleFilter {
+    /// Return notes created by humans.
+    Human,
+    /// Return notes created by agents.
+    Agent,
+    /// Return notes created by humans and agents.
+    Both,
+}
+
+impl RecentNotesRoleFilter {
+    /// Parses a recent-notes role filter from a request value.
+    ///
+    /// # Arguments
+    ///
+    /// * `role` - Optional raw role filter from the request body.
+    ///
+    /// # Returns
+    ///
+    /// Returns the parsed role filter, defaulting to `Both` when absent.
+    pub fn from_request(role: Option<&str>) -> Result<Self, crate::error::ApiError> {
+        match role.map(str::to_ascii_lowercase).as_deref() {
+            None | Some("both") => Ok(Self::Both),
+            Some("human") => Ok(Self::Human),
+            Some("agent") => Ok(Self::Agent),
+            Some(_) => Err(crate::error::ApiError::Validation),
+        }
+    }
+
+    /// Returns the stored database role value for a filtering variant.
+    ///
+    /// # Returns
+    ///
+    /// Returns `Some` for concrete role filters and `None` for `Both`.
+    pub fn stored_role(self) -> Option<&'static str> {
+        match self {
+            Self::Human => Some("Human"),
+            Self::Agent => Some("Agent"),
+            Self::Both => None,
+        }
+    }
 }
 
 /// Returns the default note role for create requests.
