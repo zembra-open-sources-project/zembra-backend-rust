@@ -29,7 +29,7 @@ path = "/home/zembra/logs"
 enabled = false
 interval_seconds = 60
 supabase_url = ""
-service_role_key = ""
+secret_key = ""
 ```
 
 字段说明：

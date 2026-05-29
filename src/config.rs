@@ -84,9 +84,9 @@ pub struct SyncSettings {
     /// Supabase project URL used by the backend REST client.
     #[serde(default)]
     pub supabase_url: String,
-    /// Supabase service role key used only by the local backend.
+    /// Supabase secret key used only by the local backend.
     #[serde(default)]
-    pub service_role_key: String,
+    pub secret_key: String,
 }
 
 impl Default for LoggingSettings {
@@ -114,7 +114,7 @@ impl Default for SyncSettings {
             enabled: false,
             interval_seconds: default_sync_interval_seconds(),
             supabase_url: String::new(),
-            service_role_key: String::new(),
+            secret_key: String::new(),
         }
     }
 }
@@ -330,9 +330,15 @@ impl SyncSettings {
                 ));
             }
 
-            if self.service_role_key.trim().is_empty() {
+            if self.secret_key.trim().is_empty() {
                 return Err(config::ConfigError::Message(
-                    "sync.service_role_key is required when sync.enabled is true".to_string(),
+                    "sync.secret_key is required when sync.enabled is true".to_string(),
+                ));
+            }
+
+            if !self.secret_key.trim().starts_with("sb_secret_") {
+                return Err(config::ConfigError::Message(
+                    "sync.secret_key must use a Supabase sb_secret_ key".to_string(),
                 ));
             }
         }
@@ -430,7 +436,7 @@ mod tests {
         assert!(!settings.sync.enabled);
         assert_eq!(settings.sync.interval_seconds, 60);
         assert_eq!(settings.sync.supabase_url, "");
-        assert_eq!(settings.sync.service_role_key, "");
+        assert_eq!(settings.sync.secret_key, "");
     }
 
     #[test]
@@ -480,7 +486,7 @@ mod tests {
                     enabled = true
                     interval_seconds = 30
                     supabase_url = "https://example.supabase.co"
-                    service_role_key = "test-service-role-key"
+                    secret_key = "sb_secret_test-key"
                     "#,
                     config::FileFormat::Toml,
                 )
@@ -498,7 +504,7 @@ mod tests {
         assert!(settings.sync.enabled);
         assert_eq!(settings.sync.interval_seconds, 30);
         assert_eq!(settings.sync.supabase_url, "https://example.supabase.co");
-        assert_eq!(settings.sync.service_role_key, "test-service-role-key");
+        assert_eq!(settings.sync.secret_key, "sb_secret_test-key");
     }
 
     #[test]
@@ -507,19 +513,31 @@ mod tests {
             enabled: true,
             interval_seconds: 60,
             supabase_url: "   ".to_string(),
-            service_role_key: "test-service-role-key".to_string(),
+            secret_key: "sb_secret_test-key".to_string(),
         };
 
         assert!(settings.validate().is_err());
     }
 
     #[test]
-    fn enabled_sync_requires_service_role_key() {
+    fn enabled_sync_requires_secret_key() {
         let settings = SyncSettings {
             enabled: true,
             interval_seconds: 60,
             supabase_url: "https://example.supabase.co".to_string(),
-            service_role_key: "   ".to_string(),
+            secret_key: "   ".to_string(),
+        };
+
+        assert!(settings.validate().is_err());
+    }
+
+    #[test]
+    fn enabled_sync_rejects_legacy_service_role_key() {
+        let settings = SyncSettings {
+            enabled: true,
+            interval_seconds: 60,
+            supabase_url: "https://example.supabase.co".to_string(),
+            secret_key: "eyJlegacy.jwt.service-role".to_string(),
         };
 
         assert!(settings.validate().is_err());
@@ -531,7 +549,7 @@ mod tests {
             enabled: false,
             interval_seconds: 4,
             supabase_url: String::new(),
-            service_role_key: String::new(),
+            secret_key: String::new(),
         };
 
         assert!(settings.validate().is_err());

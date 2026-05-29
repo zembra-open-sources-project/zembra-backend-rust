@@ -8,8 +8,8 @@ use crate::repositories::sync::SyncChangeRecord;
 pub struct SupabaseClient {
     /// Supabase project URL without a trailing slash.
     base_url: String,
-    /// Supabase service role key used for backend-only requests.
-    service_role_key: String,
+    /// Supabase secret key used for backend-only requests.
+    secret_key: String,
     /// Shared HTTP client.
     client: reqwest::Client,
 }
@@ -25,7 +25,7 @@ impl SupabaseClient {
     ///
     /// Returns a configured client.
     pub fn from_settings(settings: &crate::config::SyncSettings) -> Self {
-        Self::new(&settings.supabase_url, &settings.service_role_key)
+        Self::new(&settings.supabase_url, &settings.secret_key)
     }
 
     /// Creates a Supabase REST client from explicit values.
@@ -33,15 +33,15 @@ impl SupabaseClient {
     /// # Arguments
     ///
     /// * `base_url` - Supabase project URL.
-    /// * `service_role_key` - Service role key for backend access.
+    /// * `secret_key` - Secret key for backend access.
     ///
     /// # Returns
     ///
     /// Returns a configured client.
-    pub fn new(base_url: &str, service_role_key: &str) -> Self {
+    pub fn new(base_url: &str, secret_key: &str) -> Self {
         Self {
             base_url: base_url.trim_end_matches('/').to_string(),
-            service_role_key: service_role_key.to_string(),
+            secret_key: secret_key.to_string(),
             client: reqwest::Client::new(),
         }
     }
@@ -172,16 +172,16 @@ impl SupabaseClient {
     ///
     /// # Returns
     ///
-    /// Returns headers containing the service role key.
+    /// Returns headers containing the secret key.
     fn headers(&self) -> Result<HeaderMap, SupabaseError> {
         let mut headers = HeaderMap::new();
-        let key = HeaderValue::from_str(&self.service_role_key)
-            .map_err(|_| SupabaseError::InvalidServiceRoleKey)?;
+        let key =
+            HeaderValue::from_str(&self.secret_key).map_err(|_| SupabaseError::InvalidSecretKey)?;
         headers.insert("apikey", key.clone());
         headers.insert(
             AUTHORIZATION,
-            HeaderValue::from_str(&format!("Bearer {}", self.service_role_key))
-                .map_err(|_| SupabaseError::InvalidServiceRoleKey)?,
+            HeaderValue::from_str(&format!("Bearer {}", self.secret_key))
+                .map_err(|_| SupabaseError::InvalidSecretKey)?,
         );
 
         Ok(headers)
@@ -274,8 +274,8 @@ fn supabase_changes(changes: &[SyncChangeRecord]) -> Vec<SupabaseSyncChangeRecor
 #[derive(Debug, thiserror::Error)]
 pub enum SupabaseError {
     /// Service role key could not be encoded as an HTTP header.
-    #[error("invalid Supabase service role key")]
-    InvalidServiceRoleKey,
+    #[error("invalid Supabase secret key")]
+    InvalidSecretKey,
     /// HTTP request construction or transport failed.
     #[error("Supabase request failed: {0}")]
     Request(#[from] reqwest::Error),
@@ -315,21 +315,24 @@ mod tests {
 
     #[test]
     fn upsert_request_contains_supabase_auth_headers() {
-        let client = SupabaseClient::new("https://example.supabase.co/", "test-key");
+        let client = SupabaseClient::new("https://example.supabase.co/", "sb_secret_test-key");
         let request = client.build_upsert_sync_changes_request(&[]).unwrap();
 
         assert_eq!(
             request.url().as_str(),
             "https://example.supabase.co/rest/v1/sync_changes"
         );
-        assert_eq!(request.headers()["apikey"], "test-key");
-        assert_eq!(request.headers()["authorization"], "Bearer test-key");
+        assert_eq!(request.headers()["apikey"], "sb_secret_test-key");
+        assert_eq!(
+            request.headers()["authorization"],
+            "Bearer sb_secret_test-key"
+        );
         assert_eq!(request.headers()["prefer"], "resolution=merge-duplicates");
     }
 
     #[test]
     fn fetch_request_uses_cursor_query() {
-        let client = SupabaseClient::new("https://example.supabase.co", "test-key");
+        let client = SupabaseClient::new("https://example.supabase.co", "sb_secret_test-key");
         let request = client
             .build_fetch_remote_changes_request(10, "abc", 25)
             .unwrap();

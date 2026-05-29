@@ -68,7 +68,7 @@ impl SyncConfigService {
     /// # Returns
     ///
     /// Returns validated settings after merging the request with the previous
-    /// service role key.
+    /// secret key.
     pub fn save(&self, request: UpdateSyncConfigRequest) -> Result<SyncSettings, ApiError> {
         let mut document = self.read_document()?;
         let previous = sync_settings_from_document(&document)?;
@@ -76,9 +76,7 @@ impl SyncConfigService {
             enabled: request.enabled,
             interval_seconds: request.interval_seconds,
             supabase_url: request.supabase_url,
-            service_role_key: request
-                .service_role_key
-                .unwrap_or(previous.service_role_key),
+            secret_key: request.secret_key.unwrap_or(previous.secret_key),
         };
         validate_sync_settings(&settings)?;
 
@@ -99,7 +97,7 @@ impl SyncConfigService {
     ///
     /// # Arguments
     ///
-    /// * `request` - Optional candidate URL and service role key.
+    /// * `request` - Optional candidate URL and secret key.
     ///
     /// # Returns
     ///
@@ -113,13 +111,13 @@ impl SyncConfigService {
             enabled: true,
             interval_seconds: current.interval_seconds,
             supabase_url: request.supabase_url.unwrap_or(current.supabase_url),
-            service_role_key: request.service_role_key.unwrap_or(current.service_role_key),
+            secret_key: request.secret_key.unwrap_or(current.secret_key),
         };
         validate_sync_settings(&settings)?;
 
         let client = crate::sync::supabase::SupabaseClient::new(
             &settings.supabase_url,
-            &settings.service_role_key,
+            &settings.secret_key,
         );
         Ok(match client.test_connection().await {
             Ok(()) => SyncConfigTestResponse {
@@ -178,13 +176,13 @@ impl SyncConfigService {
 ///
 /// # Returns
 ///
-/// Returns a response without the service role key.
+/// Returns a response without the secret key.
 pub fn sync_config_response(settings: SyncSettings) -> SyncConfigResponse {
     SyncConfigResponse {
         enabled: settings.enabled,
         interval_seconds: settings.interval_seconds,
         supabase_url: settings.supabase_url,
-        service_role_key_configured: !settings.service_role_key.trim().is_empty(),
+        secret_key_configured: !settings.secret_key.trim().is_empty(),
     }
 }
 
@@ -246,14 +244,14 @@ mod tests {
                 enabled: true,
                 interval_seconds: 30,
                 supabase_url: "https://example.supabase.co".to_string(),
-                service_role_key: Some("secret-key".to_string()),
+                secret_key: Some("sb_secret_test-key".to_string()),
             })
             .unwrap();
         let response = super::sync_config_response(settings);
         let content = std::fs::read_to_string(&path).unwrap();
 
-        assert!(content.contains("service_role_key = \"secret-key\""));
-        assert!(response.service_role_key_configured);
+        assert!(content.contains("secret_key = \"sb_secret_test-key\""));
+        assert!(response.secret_key_configured);
         assert_eq!(response.supabase_url, "https://example.supabase.co");
         let _ = std::fs::remove_file(path);
     }
@@ -269,7 +267,7 @@ mod tests {
                 enabled = false
                 interval_seconds = 60
                 supabase_url = "https://old.supabase.co"
-                service_role_key = "old-key"
+                secret_key = "sb_secret_old-key"
             "#,
         )
         .unwrap();
@@ -280,12 +278,12 @@ mod tests {
                 enabled: true,
                 interval_seconds: 15,
                 supabase_url: "https://new.supabase.co".to_string(),
-                service_role_key: None,
+                secret_key: None,
             })
             .unwrap();
         let content = std::fs::read_to_string(&path).unwrap();
 
-        assert!(content.contains("service_role_key = \"old-key\""));
+        assert!(content.contains("secret_key = \"sb_secret_old-key\""));
         assert!(content.contains("supabase_url = \"https://new.supabase.co\""));
         let _ = std::fs::remove_file(path);
     }
@@ -301,7 +299,26 @@ mod tests {
                 enabled: true,
                 interval_seconds: 15,
                 supabase_url: "https://new.supabase.co".to_string(),
-                service_role_key: None,
+                secret_key: None,
+            })
+            .unwrap_err();
+
+        assert_eq!(error.code(), "invalid_config");
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn save_rejects_legacy_service_role_key() {
+        let path = temp_config_path("legacy-key");
+        let _ = std::fs::remove_file(&path);
+        let service = SyncConfigService::new(path.clone());
+
+        let error = service
+            .save(UpdateSyncConfigRequest {
+                enabled: true,
+                interval_seconds: 15,
+                supabase_url: "https://new.supabase.co".to_string(),
+                secret_key: Some("eyJlegacy.jwt.service-role".to_string()),
             })
             .unwrap_err();
 

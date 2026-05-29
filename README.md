@@ -78,7 +78,7 @@ path = "logs"
 enabled = false
 interval_seconds = 60
 supabase_url = ""
-service_role_key = ""
+secret_key = ""
 ```
 
 ### 本机使用
@@ -324,7 +324,7 @@ curl -X DELETE http://127.0.0.1:3000/notes/<note_ref>/tags/<tag_name>
 enabled = false
 interval_seconds = 60
 supabase_url = ""
-service_role_key = ""
+secret_key = ""
 ```
 
 启用同步前，需要先在 Supabase 项目中执行 `supabase/migrations/` 下的 migration。
@@ -336,10 +336,10 @@ service_role_key = ""
 enabled = true
 interval_seconds = 60
 supabase_url = "https://example.supabase.co"
-service_role_key = "your-service-role-key"
+secret_key = "sb_secret_your-secret-key"
 ```
 
-`service_role_key` 只用于本地后端访问 Supabase REST API。接口响应不会返回 key 明文。
+`secret_key` 只用于本地后端访问 Supabase REST API。接口响应不会返回 key 明文。请在 Supabase 控制台 `Settings > API Keys` 中创建并复制 `sb_secret_...` secret key，不要使用 Legacy `service_role` key。
 
 ### 查看同步状态
 
@@ -360,7 +360,7 @@ curl http://127.0.0.1:3000/sync/config
 | `enabled` | 同步是否启用 |
 | `interval_seconds` | 后台同步间隔 |
 | `supabase_url` | Supabase 项目地址 |
-| `service_role_key_configured` | 是否已配置 service role key |
+| `secret_key_configured` | 是否已配置 secret key |
 
 ### 保存同步配置
 
@@ -371,7 +371,7 @@ curl -X PUT http://127.0.0.1:3000/sync/config \
     "enabled": true,
     "interval_seconds": 60,
     "supabase_url": "https://example.supabase.co",
-    "service_role_key": "your-service-role-key"
+    "secret_key": "sb_secret_your-secret-key"
   }'
 ```
 
@@ -386,7 +386,7 @@ curl -X POST http://127.0.0.1:3000/sync/config/test \
   -H 'content-type: application/json' \
   -d '{
     "supabase_url": "https://example.supabase.co",
-    "service_role_key": "your-service-role-key"
+    "secret_key": "sb_secret_your-secret-key"
   }'
 ```
 
@@ -455,7 +455,7 @@ http://<后端机器 IP>:3000/health
 
 ```toml
 supabase_url = "https://example.supabase.co"
-service_role_key = "your-service-role-key"
+secret_key = "sb_secret_your-secret-key"
 ```
 
 ### Swagger UI 无法打开

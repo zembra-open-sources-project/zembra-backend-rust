@@ -82,7 +82,7 @@ path = "logs"
 enabled = false
 interval_seconds = 60
 supabase_url = ""
-service_role_key = ""
+secret_key = ""
 ```
 
 如果需要让局域网设备访问服务，可以把 `server.host` 设置为 `"0.0.0.0"`，并按前端地址配置 `server.cors_allowed_origins`。

@@ -47,7 +47,7 @@ pub struct SyncDirectionResponse {
     pub processed: usize,
 }
 
-/// Sync configuration response that never exposes the service role key.
+/// Sync configuration response that never exposes the Supabase secret key.
 #[derive(Debug, Clone, Serialize, ToSchema)]
 pub struct SyncConfigResponse {
     /// Whether synchronization is enabled.
@@ -56,8 +56,8 @@ pub struct SyncConfigResponse {
     pub interval_seconds: u64,
     /// Supabase project URL used by the backend REST client.
     pub supabase_url: String,
-    /// Whether a service role key is currently configured.
-    pub service_role_key_configured: bool,
+    /// Whether a Supabase secret key is currently configured.
+    pub secret_key_configured: bool,
 }
 
 /// Request used to persist synchronization settings.
@@ -69,8 +69,8 @@ pub struct UpdateSyncConfigRequest {
     pub interval_seconds: u64,
     /// Supabase project URL used by the backend REST client.
     pub supabase_url: String,
-    /// Optional new Supabase service role key.
-    pub service_role_key: Option<String>,
+    /// Optional new Supabase secret key.
+    pub secret_key: Option<String>,
 }
 
 /// Request used to test synchronization settings without persisting them.
@@ -78,8 +78,8 @@ pub struct UpdateSyncConfigRequest {
 pub struct TestSyncConfigRequest {
     /// Optional Supabase project URL used only for this test.
     pub supabase_url: Option<String>,
-    /// Optional Supabase service role key used only for this test.
-    pub service_role_key: Option<String>,
+    /// Optional Supabase secret key used only for this test.
+    pub secret_key: Option<String>,
 }
 
 /// Response returned by a Supabase configuration connectivity test.
