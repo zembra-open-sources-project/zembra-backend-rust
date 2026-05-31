@@ -288,7 +288,7 @@ impl NotesRepository {
     /// Returns randomly ordered tag records.
     pub async fn random_tags(&self, limit: i64) -> Result<Vec<TagRecord>, ApiError> {
         sqlx::query_as::<_, TagRecord>(
-            "SELECT id, path AS name, created_at FROM tags WHERE workspace_id = ? ORDER BY RANDOM() LIMIT ?",
+            "SELECT id, name, parent_tag_id, path, depth, created_at FROM tags WHERE workspace_id = ? ORDER BY RANDOM() LIMIT ?",
         )
         .bind(DEFAULT_WORKSPACE_ID)
         .bind(limit)
@@ -683,7 +683,7 @@ async fn create_note_in_transaction(
     let mut resolved_tags = Vec::with_capacity(input.tags.len());
     for tag_name in input.tags {
         let tag = attach_tag_to_note_in_transaction(transaction, &note_for_tags, &tag_name).await?;
-        resolved_tags.push(tag.name);
+        resolved_tags.push(tag.path);
     }
 
     let links = insert_note_links_in_transaction(transaction, &note_id, &input.links).await?;

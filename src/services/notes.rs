@@ -454,7 +454,7 @@ impl NotesService {
             .list_note_tags_by_id(&note.id)
             .await?
             .into_iter()
-            .map(|tag| tag.name)
+            .map(|tag| tag.path)
             .collect();
         let outgoing_links = self
             .repository

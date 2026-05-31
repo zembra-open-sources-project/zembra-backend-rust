@@ -566,6 +566,10 @@ async fn taxonomy_creates_hierarchical_tag_nodes() {
 
     assert_eq!(
         tags.iter().map(|tag| tag.name.as_str()).collect::<Vec<_>>(),
+        vec!["web"]
+    );
+    assert_eq!(
+        tags.iter().map(|tag| tag.path.as_str()).collect::<Vec<_>>(),
         vec!["rust/web"]
     );
     assert_eq!(rows[0], ("rust".to_string(), None, "rust".to_string(), 0));

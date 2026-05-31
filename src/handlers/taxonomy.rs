@@ -62,7 +62,7 @@ pub async fn list_tags(
 ) -> Result<Json<ListTagsResponse>, ApiError> {
     let repository = TaxonomyRepository::new(state.database.pool);
     let tags = repository.list_tags(query.resolved_limit()).await?;
-    let names = tags.iter().map(|tag| tag.name.clone()).collect();
+    let names = tags.iter().map(|tag| tag.path.clone()).collect();
 
     Ok(Json(ListTagsResponse { tags, names }))
 }

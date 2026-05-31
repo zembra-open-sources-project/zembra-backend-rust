@@ -9,7 +9,7 @@
 
 ### 任务 #1: 扩展 TagRecord 为 v0.4.0 结构
 
-**Status:** Designed
+**Status:** Finished
 
 **Files:**
 - Modify: `src/models/tag.rs`
@@ -23,7 +23,7 @@
 
 ### 任务 #2: 更新 taxonomy repository 查询和创建返回
 
-**Status:** Designed
+**Status:** Finished
 
 **Files:**
 - Modify: `src/repositories/taxonomy.rs`
@@ -39,7 +39,7 @@
 
 ### 任务 #3: 更新 note tags 查询和 metadata path 生成
 
-**Status:** Designed
+**Status:** Finished
 
 **Files:**
 - Modify: `src/repositories/notes/tags.rs`
@@ -56,7 +56,7 @@
 
 ### 任务 #4: 更新 random tags 查询候选和响应
 
-**Status:** Designed
+**Status:** Finished
 
 **Files:**
 - Modify: `src/repositories/notes/core.rs`
@@ -68,6 +68,8 @@
 实现说明：`random_tags` 查询所有 tags 节点，不 join `note_tags`，不限制叶子节点。`list_visible_notes_by_tag` 仍只返回与该 tag 节点直接关联的可见 notes，父节点无直接关联时可返回空 notes。
 
 预期验证结果：创建 `books/python` 后，随机候选能包含 `books` 和 `python` 两个节点；响应中的 tag 对象包含层级字段。
+
+执行记录：已完成 Stage #1 和 Stage #2。验证通过：`cargo fmt --check`、`cargo check`、`cargo test taxonomy_creates_hierarchical_tag_nodes`、`cargo test repositories::notes`。
 
 ## Stage #3: OpenAPI 和 sync 基础校验
 

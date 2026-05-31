@@ -212,7 +212,7 @@ pub async fn get_or_create_tag_in_transaction(
         }
 
         let existing = sqlx::query_as::<_, TagRecord>(
-            "SELECT id, path AS name, created_at FROM tags WHERE workspace_id = ? AND path = ?",
+            "SELECT id, name, parent_tag_id, path, depth, created_at FROM tags WHERE workspace_id = ? AND path = ?",
         )
         .bind(DEFAULT_WORKSPACE_ID)
         .bind(&current_path)
@@ -237,7 +237,7 @@ pub async fn get_or_create_tag_in_transaction(
                 .await?;
 
                 let tag = sqlx::query_as::<_, TagRecord>(
-                    "SELECT id, path AS name, created_at FROM tags WHERE workspace_id = ? AND id = ?",
+                    "SELECT id, name, parent_tag_id, path, depth, created_at FROM tags WHERE workspace_id = ? AND id = ?",
                 )
                 .bind(DEFAULT_WORKSPACE_ID)
                 .bind(&id)
@@ -257,7 +257,7 @@ pub async fn get_or_create_tag_in_transaction(
                             "workspace_id": DEFAULT_WORKSPACE_ID,
                             "name": segment,
                             "parent_tag_id": parent_tag_id.as_deref(),
-                            "path": tag.name,
+                            "path": tag.path,
                             "depth": depth as i64,
                             "created_at": tag.created_at
                         }),
@@ -318,7 +318,7 @@ async fn list_tags_with_pool(
     let limit = limit.unwrap_or(i64::MAX);
 
     sqlx::query_as::<_, TagRecord>(
-        "SELECT id, path AS name, created_at FROM tags WHERE workspace_id = ? ORDER BY path ASC LIMIT ?",
+        "SELECT id, name, parent_tag_id, path, depth, created_at FROM tags WHERE workspace_id = ? ORDER BY path ASC LIMIT ?",
     )
     .bind(DEFAULT_WORKSPACE_ID)
     .bind(limit)
