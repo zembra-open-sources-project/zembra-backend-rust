@@ -108,7 +108,7 @@
 
 ### 任务 #7: 运行全量验证并更新执行记录
 
-**Status:** Designed
+**Status:** Finished
 
 **Files:**
 - Modify: `docs/exec-plans/active/r026-schema-v040-adaptation-scope.md`
@@ -123,3 +123,5 @@
 实现说明：完成每个 Stage 后按项目规则进行原子提交；最终更新执行计划状态和 `docs/PROGRESS.md`，不归档计划，等待用户验收。
 
 预期验证结果：格式、编译、全量测试和 clippy 全部通过；工作区只包含 r026 相关变更。
+
+执行记录：已完成 Stage #4。验证通过：`cargo fmt --check`、`cargo check`、`cargo test`、`cargo clippy -- -D warnings`。
