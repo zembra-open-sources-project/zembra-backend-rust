@@ -66,6 +66,90 @@ async fn apply_remote_changes_is_idempotent() {
 }
 
 #[tokio::test]
+async fn apply_remote_tag_insert_writes_hierarchical_fields() {
+    let database = Database::connect("sqlite://:memory:").await.unwrap();
+    let repository = SyncRepository::new(database.pool.clone());
+    let parent = remote_change(
+        "remote-tag-parent-change",
+        "tag",
+        "tag-books",
+        "insert",
+        serde_json::json!({
+            "id": "tag-books",
+            "name": "books",
+            "parent_tag_id": null,
+            "path": "books",
+            "depth": 0,
+            "created_at": 100
+        }),
+    );
+    let child = remote_change(
+        "remote-tag-child-change",
+        "tag",
+        "tag-python",
+        "insert",
+        serde_json::json!({
+            "id": "tag-python",
+            "name": "python",
+            "parent_tag_id": "tag-books",
+            "path": "books/python",
+            "depth": 1,
+            "created_at": 101
+        }),
+    );
+
+    repository
+        .apply_remote_changes(&[parent, child])
+        .await
+        .unwrap();
+    let tag = sqlx::query_as::<_, (String, Option<String>, String, i64)>(
+        "SELECT name, parent_tag_id, path, depth FROM tags WHERE id = 'tag-python'",
+    )
+    .fetch_one(&database.pool)
+    .await
+    .unwrap();
+
+    assert_eq!(
+        tag,
+        (
+            "python".to_string(),
+            Some("tag-books".to_string()),
+            "books/python".to_string(),
+            1
+        )
+    );
+}
+
+#[tokio::test]
+async fn apply_remote_tag_insert_records_conflict_for_missing_path() {
+    let database = Database::connect("sqlite://:memory:").await.unwrap();
+    let repository = SyncRepository::new(database.pool.clone());
+    let change = remote_change(
+        "remote-tag-invalid-change",
+        "tag",
+        "tag-invalid",
+        "insert",
+        serde_json::json!({
+            "id": "tag-invalid",
+            "name": "invalid",
+            "parent_tag_id": null,
+            "depth": 0,
+            "created_at": 100
+        }),
+    );
+
+    repository.apply_remote_changes(&[change]).await.unwrap();
+    let conflict = sqlx::query_scalar::<_, String>(
+        "SELECT resolution_note FROM sync_conflicts WHERE remote_change_id = 'remote-tag-invalid-change'",
+    )
+    .fetch_one(&database.pool)
+    .await
+    .unwrap();
+
+    assert!(conflict.contains("missing text field path"));
+}
+
+#[tokio::test]
 async fn apply_remote_revision_selects_deterministic_winner() {
     let database = Database::connect("sqlite://:memory:").await.unwrap();
     let repository = SyncRepository::new(database.pool.clone());

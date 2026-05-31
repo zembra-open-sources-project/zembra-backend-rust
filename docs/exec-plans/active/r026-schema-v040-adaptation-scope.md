@@ -75,7 +75,7 @@
 
 ### 任务 #5: 更新 DTO 注释和 OpenAPI 回归
 
-**Status:** Designed
+**Status:** Finished
 
 **Files:**
 - Modify: `src/dto/notes.rs`
@@ -90,7 +90,7 @@
 
 ### 任务 #6: 补充 sync tag payload 基础校验测试
 
-**Status:** Designed
+**Status:** Finished
 
 **Files:**
 - Modify: `src/repositories/sync/payload.rs`
@@ -101,6 +101,8 @@
 实现说明：保留 `TagPayload` 对 `name/parent_tag_id/path/depth/created_at` 的解析；补充完整 payload apply 成功测试。缺少 `path` 或 `depth` 的旧 payload 是否继续兼容，应按设计文档选择：r026 只保留基础字段校验，不做乱序补偿。
 
 预期验证结果：完整 tag payload 能应用为结构化 tag；不可应用 payload 进入现有 conflict 路径。
+
+执行记录：已完成 Stage #3。验证通过：`cargo fmt --check`、`cargo test openapi_json_lists_runtime_api_paths`、`cargo test apply_remote_tag_insert`。
 
 ## Stage #4: 整体验证和计划回写
 

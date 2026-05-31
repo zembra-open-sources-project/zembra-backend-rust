@@ -120,8 +120,8 @@ impl<'a> TryFrom<&'a Value> for TagPayload<'a> {
             id: required_text(payload, "id")?,
             name: required_text(payload, "name")?,
             parent_tag_id: optional_text(payload, "parent_tag_id"),
-            path: optional_text(payload, "path").unwrap_or(required_text(payload, "name")?),
-            depth: optional_i64(payload, "depth").unwrap_or(0),
+            path: required_text(payload, "path")?,
+            depth: required_i64(payload, "depth")?,
             created_at: required_i64(payload, "created_at")?,
         })
     }

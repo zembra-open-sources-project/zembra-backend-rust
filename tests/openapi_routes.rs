@@ -67,6 +67,21 @@ async fn openapi_json_lists_runtime_api_paths() {
             .get("backlinks")
             .is_some()
     );
+    assert!(
+        body["components"]["schemas"]["TagRecord"]["properties"]
+            .get("parent_tag_id")
+            .is_some()
+    );
+    assert!(
+        body["components"]["schemas"]["TagRecord"]["properties"]
+            .get("path")
+            .is_some()
+    );
+    assert!(
+        body["components"]["schemas"]["TagRecord"]["properties"]
+            .get("depth")
+            .is_some()
+    );
 }
 
 #[tokio::test]

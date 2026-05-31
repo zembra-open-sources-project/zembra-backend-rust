@@ -74,7 +74,7 @@ pub struct CreateNoteRequest {
     pub content: String,
     /// Optional field name to associate with the note.
     pub field: Option<String>,
-    /// Optional tag names to associate with the note.
+    /// Optional full tag paths to associate with the note.
     #[serde(default)]
     pub tags: Vec<String>,
     /// Role that created the note.
@@ -195,7 +195,7 @@ pub struct ListNoteTagsResponse {
 pub struct NoteMetadata {
     /// Resolved field name.
     pub field: Option<String>,
-    /// Resolved tag names.
+    /// Resolved full tag paths.
     pub tags: Vec<String>,
     /// Role that created the note.
     pub role: String,
@@ -229,7 +229,7 @@ pub struct UpdateNoteRequest {
     /// Optional field update; absent keeps the current field, null selects inbox.
     #[serde(default, deserialize_with = "deserialize_optional_field_update")]
     pub field: Option<Option<String>>,
-    /// Optional replacement tag list; absent keeps current tags.
+    /// Optional replacement full tag path list; absent keeps current tags.
     pub tags: Option<Vec<String>>,
     /// Optional replacement outgoing links; absent keeps current links.
     #[validate(nested)]
