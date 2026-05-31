@@ -12,6 +12,8 @@ const NOTE_ROLE_MIGRATION: &str =
     include_str!("../../vendor/zembra-schema/migrations/002_add_note_role.sql");
 const BIDIRECTIONAL_SYNC_MIGRATION: &str =
     include_str!("../../vendor/zembra-schema/migrations/003_add_bidirectional_sync.sql");
+const HIERARCHICAL_TAGS_MIGRATION: &str =
+    include_str!("../../vendor/zembra-schema/migrations/004_add_hierarchical_tags.sql");
 
 /// SQLite database handle shared by application services.
 #[derive(Debug, Clone)]
@@ -48,7 +50,7 @@ impl Database {
         Ok(database)
     }
 
-    /// Applies v0.3.0 shared schema migrations to the database.
+    /// Applies v0.4.0 shared schema migrations to the database.
     ///
     /// # Returns
     ///
@@ -78,6 +80,17 @@ impl Database {
                 record_schema_version(&self.pool, "0.3.0").await?;
             } else {
                 self.pool.execute(BIDIRECTIONAL_SYNC_MIGRATION).await?;
+            }
+        }
+
+        if !schema_version_exists(&self.pool, "0.4.0").await? {
+            if column_exists(&self.pool, "tags", "parent_tag_id").await?
+                && column_exists(&self.pool, "tags", "path").await?
+                && column_exists(&self.pool, "tags", "depth").await?
+            {
+                record_schema_version(&self.pool, "0.4.0").await?;
+            } else {
+                self.pool.execute(HIERARCHICAL_TAGS_MIGRATION).await?;
             }
         }
 
@@ -130,6 +143,13 @@ where
     {
         ensure_default_workspace(executor).await?;
         record_schema_version(executor, "0.3.0").await?;
+    }
+
+    if column_exists(executor, "tags", "parent_tag_id").await?
+        && column_exists(executor, "tags", "path").await?
+        && column_exists(executor, "tags", "depth").await?
+    {
+        record_schema_version(executor, "0.4.0").await?;
     }
 
     Ok(())
@@ -300,7 +320,7 @@ mod tests {
     ///
     /// # Returns
     ///
-    /// Returns a database handle with v0.3.0 tables and no `schema_migrations`.
+    /// Returns a database handle with v0.4.0 tables and no `schema_migrations`.
     async fn legacy_database_without_migration_metadata() -> Database {
         let database = Database::connect("sqlite://:memory:").await.unwrap();
         sqlx::query("DROP TABLE schema_migrations")
@@ -329,6 +349,11 @@ mod tests {
         );
         assert!(
             schema_version_exists(&database.pool, "0.3.0")
+                .await
+                .unwrap()
+        );
+        assert!(
+            schema_version_exists(&database.pool, "0.4.0")
                 .await
                 .unwrap()
         );

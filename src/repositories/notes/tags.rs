@@ -37,9 +37,9 @@ impl NotesRepository {
     /// Returns tag records ordered by name.
     pub async fn list_note_tags_by_id(&self, note_id: &str) -> Result<Vec<TagRecord>, ApiError> {
         sqlx::query_as::<_, TagRecord>(
-            "SELECT tags.id, tags.name, tags.created_at \
+            "SELECT tags.id, tags.path AS name, tags.created_at \
              FROM tags INNER JOIN note_tags ON tags.workspace_id = note_tags.workspace_id AND tags.id = note_tags.tag_id \
-             WHERE note_tags.workspace_id = ? AND note_tags.note_id = ? ORDER BY tags.name ASC",
+             WHERE note_tags.workspace_id = ? AND note_tags.note_id = ? ORDER BY tags.path ASC",
         )
         .bind(DEFAULT_WORKSPACE_ID)
         .bind(note_id)
@@ -157,7 +157,7 @@ async fn detach_tag_from_note_in_transaction(
     tag_name: &str,
 ) -> Result<(), ApiError> {
     let tag_id =
-        sqlx::query_scalar::<_, String>("SELECT id FROM tags WHERE workspace_id = ? AND name = ?")
+        sqlx::query_scalar::<_, String>("SELECT id FROM tags WHERE workspace_id = ? AND path = ?")
             .bind(DEFAULT_WORKSPACE_ID)
             .bind(tag_name)
             .fetch_optional(&mut **transaction)
@@ -209,7 +209,7 @@ pub(super) async fn replace_note_tags_in_transaction(
     tag_names: &[String],
 ) -> Result<(), ApiError> {
     let current_tags = sqlx::query_as::<_, TagRecord>(
-        "SELECT tags.id, tags.name, tags.created_at \
+        "SELECT tags.id, tags.path AS name, tags.created_at \
          FROM tags INNER JOIN note_tags ON tags.workspace_id = note_tags.workspace_id AND tags.id = note_tags.tag_id \
          WHERE note_tags.workspace_id = ? AND note_tags.note_id = ?",
     )

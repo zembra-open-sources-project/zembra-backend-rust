@@ -8,6 +8,34 @@ use crate::repositories::sync::{SyncChangeInput, record_sync_change_in_transacti
 /// Default workspace inserted by shared schema v0.3.0 for legacy local data.
 pub const DEFAULT_WORKSPACE_ID: &str = "00000000-0000-4000-8000-000000000300";
 
+/// Parsed hierarchical tag path ready for database writes.
+struct TagPath {
+    /// Non-empty tag path segments in root-to-leaf order.
+    segments: Vec<String>,
+}
+
+impl TagPath {
+    /// Parses a client tag string into non-empty hierarchical path segments.
+    ///
+    /// # Arguments
+    ///
+    /// * `name` - Normalized tag name or slash-delimited path.
+    ///
+    /// # Returns
+    ///
+    /// Returns a tag path with empty path segments removed.
+    fn parse(name: &str) -> Self {
+        let segments = name
+            .split('/')
+            .map(str::trim)
+            .filter(|segment| !segment.is_empty())
+            .map(ToOwned::to_owned)
+            .collect();
+
+        Self { segments }
+    }
+}
+
 /// Repository for field and tag data access.
 #[derive(Debug, Clone)]
 pub struct TaxonomyRepository {
@@ -170,54 +198,82 @@ pub async fn get_or_create_tag_in_transaction(
     transaction: &mut Transaction<'_, Sqlite>,
     name: &str,
 ) -> Result<TagRecord, sqlx::Error> {
-    if let Some(tag) = sqlx::query_as::<_, TagRecord>(
-        "SELECT id, name, created_at FROM tags WHERE workspace_id = ? AND name = ?",
-    )
-    .bind(DEFAULT_WORKSPACE_ID)
-    .bind(name)
-    .fetch_optional(&mut **transaction)
-    .await?
-    {
-        return Ok(tag);
+    let tag_path = TagPath::parse(name);
+    let mut parent_tag_id: Option<String> = None;
+    let mut current_path = String::new();
+    let mut leaf_tag: Option<TagRecord> = None;
+
+    for (depth, segment) in tag_path.segments.iter().enumerate() {
+        if current_path.is_empty() {
+            current_path.push_str(segment);
+        } else {
+            current_path.push('/');
+            current_path.push_str(segment);
+        }
+
+        let existing = sqlx::query_as::<_, TagRecord>(
+            "SELECT id, path AS name, created_at FROM tags WHERE workspace_id = ? AND path = ?",
+        )
+        .bind(DEFAULT_WORKSPACE_ID)
+        .bind(&current_path)
+        .fetch_optional(&mut **transaction)
+        .await?;
+
+        let tag = match existing {
+            Some(tag) => tag,
+            None => {
+                let id = new_id();
+                sqlx::query(
+                    "INSERT INTO tags (id, workspace_id, name, parent_tag_id, path, depth, created_at) \
+                     VALUES (?, ?, ?, ?, ?, ?, unixepoch())",
+                )
+                .bind(&id)
+                .bind(DEFAULT_WORKSPACE_ID)
+                .bind(segment)
+                .bind(parent_tag_id.as_deref())
+                .bind(&current_path)
+                .bind(depth as i64)
+                .execute(&mut **transaction)
+                .await?;
+
+                let tag = sqlx::query_as::<_, TagRecord>(
+                    "SELECT id, path AS name, created_at FROM tags WHERE workspace_id = ? AND id = ?",
+                )
+                .bind(DEFAULT_WORKSPACE_ID)
+                .bind(&id)
+                .fetch_one(&mut **transaction)
+                .await?;
+
+                record_sync_change_in_transaction(
+                    transaction,
+                    SyncChangeInput {
+                        entity_type: "tag",
+                        entity_id: tag.id.clone(),
+                        operation: "insert",
+                        base_revision_id: None,
+                        new_revision_id: None,
+                        payload: serde_json::json!({
+                            "id": tag.id,
+                            "workspace_id": DEFAULT_WORKSPACE_ID,
+                            "name": segment,
+                            "parent_tag_id": parent_tag_id.as_deref(),
+                            "path": tag.name,
+                            "depth": depth as i64,
+                            "created_at": tag.created_at
+                        }),
+                    },
+                )
+                .await?;
+
+                tag
+            }
+        };
+
+        parent_tag_id = Some(tag.id.clone());
+        leaf_tag = Some(tag);
     }
 
-    let id = new_id();
-    sqlx::query(
-        "INSERT INTO tags (id, workspace_id, name, created_at) VALUES (?, ?, ?, unixepoch())",
-    )
-    .bind(&id)
-    .bind(DEFAULT_WORKSPACE_ID)
-    .bind(name)
-    .execute(&mut **transaction)
-    .await?;
-
-    let tag = sqlx::query_as::<_, TagRecord>(
-        "SELECT id, name, created_at FROM tags WHERE workspace_id = ? AND id = ?",
-    )
-    .bind(DEFAULT_WORKSPACE_ID)
-    .bind(&id)
-    .fetch_one(&mut **transaction)
-    .await?;
-
-    record_sync_change_in_transaction(
-        transaction,
-        SyncChangeInput {
-            entity_type: "tag",
-            entity_id: tag.id.clone(),
-            operation: "insert",
-            base_revision_id: None,
-            new_revision_id: None,
-            payload: serde_json::json!({
-                "id": tag.id,
-                "workspace_id": DEFAULT_WORKSPACE_ID,
-                "name": tag.name,
-                "created_at": tag.created_at
-            }),
-        },
-    )
-    .await?;
-
-    Ok(tag)
+    leaf_tag.ok_or(sqlx::Error::RowNotFound)
 }
 
 /// Lists field records using a pool.
@@ -262,7 +318,7 @@ async fn list_tags_with_pool(
     let limit = limit.unwrap_or(i64::MAX);
 
     sqlx::query_as::<_, TagRecord>(
-        "SELECT id, name, created_at FROM tags WHERE workspace_id = ? ORDER BY name ASC LIMIT ?",
+        "SELECT id, path AS name, created_at FROM tags WHERE workspace_id = ? ORDER BY path ASC LIMIT ?",
     )
     .bind(DEFAULT_WORKSPACE_ID)
     .bind(limit)

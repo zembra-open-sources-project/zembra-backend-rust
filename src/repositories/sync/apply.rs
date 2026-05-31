@@ -188,11 +188,15 @@ async fn apply_remote_change_in_transaction(
         (RemoteEntityKind::Tag, RemoteOperation::Insert) => {
             let payload = TagPayload::try_from(payload)?;
             sqlx::query(
-                "INSERT OR IGNORE INTO tags (id, workspace_id, name, created_at) VALUES (?, ?, ?, ?)",
+                "INSERT OR IGNORE INTO tags (id, workspace_id, name, parent_tag_id, path, depth, created_at) \
+                 VALUES (?, ?, ?, ?, ?, ?, ?)",
             )
             .bind(payload.id)
             .bind(DEFAULT_WORKSPACE_ID)
             .bind(payload.name)
+            .bind(payload.parent_tag_id)
+            .bind(payload.path)
+            .bind(payload.depth)
             .bind(payload.created_at)
             .execute(&mut **transaction)
             .await

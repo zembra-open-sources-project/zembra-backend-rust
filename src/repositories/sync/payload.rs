@@ -16,6 +16,12 @@ pub(super) struct TagPayload<'a> {
     pub id: &'a str,
     /// Tag name.
     pub name: &'a str,
+    /// Optional parent tag ID.
+    pub parent_tag_id: Option<&'a str>,
+    /// Full tag path.
+    pub path: &'a str,
+    /// Tag depth from root.
+    pub depth: i64,
     /// Tag creation timestamp.
     pub created_at: i64,
 }
@@ -113,6 +119,9 @@ impl<'a> TryFrom<&'a Value> for TagPayload<'a> {
         Ok(Self {
             id: required_text(payload, "id")?,
             name: required_text(payload, "name")?,
+            parent_tag_id: optional_text(payload, "parent_tag_id"),
+            path: optional_text(payload, "path").unwrap_or(required_text(payload, "name")?),
+            depth: optional_i64(payload, "depth").unwrap_or(0),
             created_at: required_i64(payload, "created_at")?,
         })
     }

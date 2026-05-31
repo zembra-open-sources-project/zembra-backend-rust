@@ -288,7 +288,7 @@ impl NotesRepository {
     /// Returns randomly ordered tag records.
     pub async fn random_tags(&self, limit: i64) -> Result<Vec<TagRecord>, ApiError> {
         sqlx::query_as::<_, TagRecord>(
-            "SELECT id, name, created_at FROM tags WHERE workspace_id = ? ORDER BY RANDOM() LIMIT ?",
+            "SELECT id, path AS name, created_at FROM tags WHERE workspace_id = ? ORDER BY RANDOM() LIMIT ?",
         )
         .bind(DEFAULT_WORKSPACE_ID)
         .bind(limit)

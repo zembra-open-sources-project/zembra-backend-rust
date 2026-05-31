@@ -3,7 +3,7 @@ use crate::dto::notes::RecentNotesRoleFilter;
 use crate::error::ApiError;
 use crate::repositories::database::Database;
 use crate::repositories::sync::list_sync_changes;
-use crate::repositories::taxonomy::TaxonomyRepository;
+use crate::repositories::taxonomy::{DEFAULT_WORKSPACE_ID, TaxonomyRepository};
 
 /// Creates an in-memory notes repository for tests.
 ///
@@ -541,6 +541,37 @@ async fn taxonomy_lists_records_by_name() {
         tags.iter().map(|tag| tag.name.as_str()).collect::<Vec<_>>(),
         vec!["api", "rust"]
     );
+}
+
+#[tokio::test]
+async fn taxonomy_creates_hierarchical_tag_nodes() {
+    let repository = notes_repository().await;
+    let mut input = input("tagged");
+    input.tags = Vec::new();
+    let created = repository.create_note(input).await.unwrap();
+
+    repository
+        .add_tag_to_note(&created.note.id, "rust/web")
+        .await
+        .unwrap();
+
+    let tags = repository.list_note_tags(&created.note.id).await.unwrap();
+    let rows = sqlx::query_as::<_, (String, Option<String>, String, i64)>(
+        "SELECT name, parent_tag_id, path, depth FROM tags WHERE workspace_id = ? ORDER BY depth ASC, path ASC",
+    )
+    .bind(DEFAULT_WORKSPACE_ID)
+    .fetch_all(&repository.pool)
+    .await
+    .unwrap();
+
+    assert_eq!(
+        tags.iter().map(|tag| tag.name.as_str()).collect::<Vec<_>>(),
+        vec!["rust/web"]
+    );
+    assert_eq!(rows[0], ("rust".to_string(), None, "rust".to_string(), 0));
+    assert_eq!(rows[1].0, "web");
+    assert_eq!(rows[1].2, "rust/web");
+    assert_eq!(rows[1].3, 1);
 }
 
 #[tokio::test]
