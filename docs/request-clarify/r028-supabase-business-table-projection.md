@@ -1,37 +1,78 @@
-# r028 Supabase 业务表投影同步
+# r028 Supabase 真实双向同步
 
 日期：2026-06-19
 
 ## 需求结论
 
-将 Supabase 从“只保存 `sync_changes` 同步日志”升级为“同步日志 + 业务表当前状态投影”的双向同步数据库。`sync_changes` 继续作为同步协议、增量游标、冲突判断和重放依据；远端 `notes`、`fields`、`tags`、`note_revisions`、`note_tags`、`note_links` 等业务表需要随 push 更新，作为 Supabase 控制台、调试工具和未来远端查询的当前状态入口。
+本需求目标是实现本地 SQLite 与 Supabase 之间的真实双向同步。同步不是单纯推送 `sync_changes`，也不是只把本地 pending changes 投影到远端业务表；同步必须先读取本地和 Supabase 两端的当前数据，比较差异，再把差异同步到另一端。验收只以真实 Supabase 数据结果为准：先确认本地已有数据完整同步到 Supabase，再确认新数据也能同步到 Supabase。单元测试、mock 请求、只看接口返回成功或只看 `sync_changes` 都不能作为验收通过依据。
 
 ## 背景
 
-当前后端已经能将本地 `sync_changes` push 到 Supabase，也能从远端 `sync_changes` pull 并 apply 到本地业务表。实际验证中，远端 `sync_changes` 已有数据，但 `notes`、`fields`、`tags` 等业务表仍为空。这说明当前 Supabase 只承担同步日志存储，尚未形成可查询的远端业务状态投影。
+当前后端已经具备部分 Supabase 同步能力，远端 `sync_changes` 中已有数据，但 Supabase 业务表仍为空或不完整。这说明现有实现没有完成真实数据同步，只保存了同步日志。用户明确要求同步的是所有指定表的真实数据，而不是日志投影、临时补偿或只处理新增 pending change 的路径。
 
-## 范围
+## 同步表范围
 
-| 项目 | 结论 |
+本需求只同步以下 9 张表：
+
+| 表 | 同步要求 |
 | --- | --- |
-| 同步模型 | `sync_changes` 作为权威同步日志，业务表作为当前状态投影 |
-| 投影触发位置 | 后端 push 时先写远端业务表投影，再写远端 `sync_changes`，最后推进本地 push cursor |
-| 远端访问方式 | 继续使用 Supabase REST/PostgREST，不直接连接远端 Postgres |
-| 第一版投影实体 | `fields`、`tags`、`notes`、`note_revisions`、`note_tags`、`note_links` |
-| note 删除/归档语义 | 对 `note insert/update/delete/restore/archive` 均 upsert `notes`，通过 `deleted_at`、`archived_at` 表达软状态 |
-| 关系解除语义 | `note_tag detach` 删除远端 `note_tags` 关系行；`note_link detach` 删除远端 `note_links` 关系行 |
-| 失败处理 | 业务表投影失败时不写入对应远端 `sync_changes`，不推进本地 push cursor，不标记本地 change 为 committed |
-| 幂等性 | 远端业务表 upsert/delete 和 `sync_changes` upsert 必须可重复执行 |
+| `workspaces` | 本地与远端双向对齐 |
+| `devices` | 本地与远端双向对齐 |
+| `fields` | 本地与远端双向对齐 |
+| `tags` | 本地与远端双向对齐 |
+| `notes` | 本地与远端双向对齐，软删除和归档状态也必须同步 |
+| `note_revisions` | 本地与远端双向对齐 |
+| `note_tags` | 本地与远端双向对齐 |
+| `note_links` | 本地与远端双向对齐 |
+| `sync_changes` | 本地与远端双向对齐，并作为变更时间顺序依据 |
+
+明确不纳入同步表范围：
+
+| 表 | 结论 |
+| --- | --- |
+| `sync_state` | 不参与两端数据同步，只作为本地同步游标或运行状态 |
+| `sync_conflicts` | 不参与两端数据同步，只作为冲突记录 |
+
+## 同步语义
+
+| 场景 | 处理 |
+| --- | --- |
+| 本地有、Supabase 没有 | 推送到 Supabase |
+| Supabase 有、本地没有 | 拉取到本地 |
+| 两边都有且字段相同 | 不处理 |
+| 两边都有但字段不同 | 以 `sync_changes.created_at` 时间顺序判断，较新的 change 对应状态覆盖较旧状态 |
+| 无法用 `sync_changes.created_at` 判断先后 | 不允许静默覆盖，必须记录冲突或返回错误停止 |
+| 关系表两端不一致 | 按同样规则同步 `note_tags`、`note_links` 的增删差异 |
+| note 软删除或归档状态不一致 | 按 `sync_changes.created_at` 判断最终 `deleted_at`、`archived_at` 状态 |
+
+同步必须以表数据真实一致为目标。`sync_changes` 是判断变更顺序的依据之一，但不能替代对本地表和 Supabase 远端表的实际读取和差异比较。
+
+## 真实同步流程要求
+
+1. 读取本地 9 张同步表的当前数据。
+2. 读取 Supabase 远端 9 张同步表的当前数据。
+3. 按表主键或复合主键建立对应关系。
+4. 计算本地缺失、远端缺失、两端字段不同三类差异。
+5. 根据差异写入本地或远端。
+6. 字段冲突必须按 `sync_changes.created_at` 判断方向。
+7. 无法判断方向时停止并记录冲突，禁止自动乱覆盖。
+8. 同步完成后再次读取两端数据，确认 9 张表达到一致状态。
 
 ## 验收标准
 
-- 本地已有 pending `sync_changes` push 后，Supabase `sync_changes` 和对应业务表都有可见数据。
-- 远端 `fields`、`tags`、`notes`、`note_revisions`、`note_tags`、`note_links` 与本地 change payload 表达的状态一致。
-- `note delete/archive/restore` 不物理删除 note，而是更新远端 `notes.deleted_at` 或 `notes.archived_at`。
-- `note_tag detach` 和 `note_link detach` 会删除对应远端关系行。
-- 任一业务表投影失败时，本地 push cursor 和 `supabase_committed_at` 不推进，下一次 push 可重试。
-- 自动化测试覆盖 Supabase client 业务表 upsert/delete 请求构造，以及 sync service 在投影失败时不推进游标。
-- 手工验证能在 Supabase 控制台看到业务表当前状态数据。
+验收只接受真实 Supabase 同步结果，必须按顺序满足以下两条：
+
+1. 本地已有数据必须完整、真实同步到 Supabase。验收时需要在 Supabase 中看到本地已有 `workspaces`、`devices`、`fields`、`tags`、`notes`、`note_revisions`、`note_tags`、`note_links`、`sync_changes` 对应数据。
+2. 在第一条通过后，新创建的数据也必须能够同步。验收时需要先创建一条新数据，再确认这条新数据对应的业务表记录和 `sync_changes` 都真实出现在 Supabase。
+
+以下内容不能作为验收通过标准：
+
+- 本地单元测试通过。
+- mock Supabase 请求通过。
+- 只看到 `/sync/push`、`/sync/run` 返回成功。
+- 只看到 Supabase `sync_changes` 有数据。
+- 使用临时随机数据替代本地已有数据。
+- 无条件重放 committed changes，而不比较本地和远端真实差异。
 
 ## 非范围
 
@@ -42,4 +83,3 @@
 - 不做附件二进制同步。
 - 不做多 workspace。
 - 不做冲突 UI。
-- 不重新设计已有 pull apply 规则。
