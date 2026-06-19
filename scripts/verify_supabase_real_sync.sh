@@ -262,7 +262,7 @@ def wait_for_backend():
 
 
 def main():
-    """Run the r028 existing-data real synchronization verification."""
+    """Run existing-data real synchronization verification."""
     (
         database_path,
         supabase_url,
@@ -280,7 +280,7 @@ def main():
     connection = sqlite3.connect(database_path)
     connection.row_factory = sqlite3.Row
     local_version, remote_version = schema_versions(connection, supabase_url, secret_key)
-    print("r028 real sync verification")
+    print("Supabase real sync verification")
     print(f"database={database_path}")
     print(f"supabase={supabase_url}")
     print(f"local_schema_contract={local_version}")
@@ -295,7 +295,7 @@ def main():
         print("table comparison skipped until schema contracts match")
     print()
     print("running real sync through backend /sync/run")
-    runtime_home = tempfile.TemporaryDirectory(prefix="zembra-r028-home-")
+    runtime_home = tempfile.TemporaryDirectory(prefix="zembra-real-sync-home-")
     write_runtime_config(
         runtime_home.name,
         database_path,
@@ -305,7 +305,7 @@ def main():
         remote_database_password,
     )
     server_env = {**os.environ, "HOME": runtime_home.name}
-    server_log_path = Path(runtime_home.name) / "zembra-r028-server.log"
+    server_log_path = Path(runtime_home.name) / "zembra-real-sync-server.log"
     server_log = server_log_path.open("w", encoding="utf-8")
     server = subprocess.Popen(
         ["cargo", "run", "--quiet", "--bin", "zembra-backend-rust"],
@@ -341,11 +341,11 @@ def main():
     print(f"after_local_schema_contract={local_version}")
     print(f"after_remote_schema_contract={remote_version}")
     if local_version != remote_version:
-        raise RuntimeError("r028 existing-data sync verification failed: schema contracts differ")
+        raise RuntimeError("existing-data sync verification failed: schema contracts differ")
 
     if not compare_all(connection, supabase_url, secret_key, "after sync"):
-        raise RuntimeError("r028 existing-data sync verification failed: table rows differ")
-    print("r028 existing-data sync verification passed by full table row comparison")
+        raise RuntimeError("existing-data sync verification failed: table rows differ")
+    print("existing-data sync verification passed by full table row comparison")
 
 
 if __name__ == "__main__":
