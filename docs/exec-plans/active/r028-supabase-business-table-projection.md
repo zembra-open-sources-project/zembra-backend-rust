@@ -8,11 +8,11 @@
 
 **相关设计文档：** `docs/design-docs/r028-supabase-business-table-projection.md`
 
-**架构：** 同步流程必须读取本地和 Supabase 两端的真实表数据，按主键或复合主键比较差异，再把差异写入缺失或较旧的一端。`sync_changes.created_at` 只作为字段差异和关系差异的时间顺序依据，不能替代九张表的实际读取、比较和写入。
+**架构：** 同步流程必须先确认本地 SQLite 与远端 Supabase/Postgres 处在同一个 `zembra-schema` contract version；不一致时先按 `vendor/zembra-schema/postgres/` 既有迁移把远端整体迁到目标版本，再读取本地和 Supabase 两端的真实表数据，按主键或复合主键比较差异，再把差异写入缺失或较旧的一端。`sync_changes.created_at` 只作为字段差异和关系差异的时间顺序依据，不能替代 schema contract 一致性检查，也不能替代九张表的实际读取、比较和写入。
 
 **技术栈：** Rust、Tokio、SQLx SQLite、Reqwest、Supabase REST/PostgREST、`vendor/zembra-schema` 已固定的数据契约。
 
-**范围 / 非范围：** 范围只包含 `workspaces`、`devices`、`fields`、`tags`、`notes`、`note_revisions`、`note_tags`、`note_links`、`sync_changes` 九张表的真实双向同步；`sync_state` 和 `sync_conflicts` 不作为同步表，只可作为本地状态或冲突记录；本仓库不修改 schema、不新增 migration、不新增远端表字段索引约束、不使用 Supabase trigger/function/Realtime、不直接连接远端 Postgres、不做附件同步、不做多 workspace、不做冲突 UI。
+**范围 / 非范围：** 范围包含远端 schema contract 一致性检查、基于 `vendor/zembra-schema/postgres/` 既有迁移的远端整体 contract 迁移，以及 `workspaces`、`devices`、`fields`、`tags`、`notes`、`note_revisions`、`note_tags`、`note_links`、`sync_changes` 九张表的真实双向同步；`sync_state` 和 `sync_conflicts` 不作为同步表，只可作为本地状态或冲突记录；本仓库不定义、不复制、不手写业务 schema，不做缺表缺字段局部修补，不把 `note_links` 当特殊 case，不使用 Supabase trigger/function/Realtime，不做附件同步、不做多 workspace、不做冲突 UI。
 
 ---
 
@@ -47,6 +47,50 @@
 - 功能：把用户验收标准落成可执行检查清单，避免再用单元测试或随机数据当通过依据。
 - 实现说明：清单必须分成两步：第一步只验证当前本地已有数据同步到 Supabase；第二步在第一步通过后创建新数据并验证 Supabase 九张表。清单必须禁止制造随机测试数据替代已有数据，禁止把本地单元测试、mock 请求、接口返回成功、只看到 `sync_changes` 有数据当作验收通过。
 - 预期验证结果：设计文档和本计划都能直接看出真实验收顺序；后续实现完成前不得把自动化测试结果写成验收通过。
+
+## Stage #2A: Schema Contract 一致性与远端迁移
+
+### Task #16: 设计并实现本地与远端 schema contract version 读取
+
+**Status:** Designed
+
+**文件：**
+- 创建：`src/sync/schema_contract.rs`
+- 修改：`src/sync/mod.rs`
+- 修改：`src/repositories/sync/mod.rs`
+- 验证：`src/repositories/sync/tests.rs`
+
+- 功能：同步前读取本地 SQLite 与远端 Supabase/Postgres 的 schema contract version。
+- 实现说明：本地版本读取 `schema_migrations` 当前最高或目标版本；远端版本必须读取远端 `schema_migrations`，不能通过检查九张同步表是否存在来替代。远端读取需要管理员级 Postgres/Supabase migration 连接配置，不能复用只适合 PostgREST 数据访问的 Supabase REST `secret_key` 来执行 DDL。
+- 预期验证结果：自动化测试覆盖本地版本读取；远端读取封装有清晰错误类型；当远端版本缺失或低于本地目标版本时返回 schema contract mismatch。
+
+### Task #17: 实现远端 schema contract migration
+
+**Status:** Designed
+
+**文件：**
+- 创建：`src/sync/schema_migration.rs`
+- 修改：`src/config.rs`
+- 修改：`src/services/sync.rs`
+- 验证：`src/sync/schema_migration.rs`
+
+- 功能：当远端 contract version 落后时，由后端执行 `vendor/zembra-schema/postgres/` 既有迁移，把远端整体迁到目标版本。
+- 实现说明：迁移来源只能读取 `vendor/zembra-schema/postgres/`，禁止在后端代码中内嵌、复制或拼接业务 DDL；迁移按 contract version 执行整体路径，不按缺失表或缺失字段做局部修补。迁移必须是显式管理员能力，普通数据同步发现版本不一致时停止并返回明确错误，具备迁移配置和执行许可时才运行 migration。
+- 预期验证结果：单元测试覆盖 migration 文件选择、版本顺序和禁止局部补表；配置缺少管理员连接时，普通同步返回 schema contract mismatch，不继续读取九张表。
+
+### Task #18: 将 schema contract gate 接入同步入口
+
+**Status:** Designed
+
+**文件：**
+- 修改：`src/services/sync.rs`
+- 修改：`src/handlers/sync.rs`
+- 修改：`scripts/verify_r028_real_sync.sh`
+- 验证：`tests/sync_routes.rs`
+
+- 功能：`/sync/run`、`/sync/push`、`/sync/pull` 在读取九张表前先执行 schema contract gate。
+- 实现说明：schema contract 一致时进入已有快照同步流程；不一致且不能迁移时返回同步失败；迁移成功后重新读取远端 contract version，再进入同步流程。脚本验收必须先报告两端 schema contract version，再报告九张表数据一致性。
+- 预期验证结果：路由测试覆盖 schema mismatch 返回失败；真实验收脚本输出本地/远端 contract version，且不再把 `note_links` 缺失表作为局部修补目标。
 
 ## Stage #2: 本地九张表快照读取
 
@@ -205,7 +249,7 @@
 - 功能：把当前本地已经存在的笔记和相关数据真实同步到 Supabase。
 - 实现说明：禁止制造随机数据；禁止只看 `sync_changes`；必须确认 Supabase 中九张表都出现本地已有数据对应记录。若远端存在本地没有的数据，也必须验证被拉回本地。
 - 预期验证结果：Supabase 九张表与本地九张表在主键集合和字段值上达到一致，计划中记录真实 Supabase 验证时间、命令摘要和结果。
-- 验证记录：2026-06-19 真实执行 `./scripts/verify_r028_real_sync.sh`。本地已有数据为 `workspaces=1`、`devices=1`、`fields=4`、`tags=11`、`notes=21`、`note_revisions=24`、`note_tags=10`、`note_links=1`、`sync_changes=43`；Supabase 同步前为 `workspaces=1`、`devices=1`、`fields=0`、`tags=0`、`notes=0`、`note_revisions=0`、`note_tags=0`、`note_links` 无法读取、`sync_changes=37`。调用 `/sync/run` 返回失败：Supabase/PostgREST 报 `PGRST205`，远端 schema cache 中找不到 `public.note_links` 表。由于本需求同步表明确包含 `note_links`，且本仓禁止创建或修改 Supabase schema，本验收未通过，必须先让真实 Supabase 远端具备 `note_links` 表后才能继续验收。
+- 验证记录：2026-06-19 真实执行 `./scripts/verify_r028_real_sync.sh`。本地已有数据为 `workspaces=1`、`devices=1`、`fields=4`、`tags=11`、`notes=21`、`note_revisions=24`、`note_tags=10`、`note_links=1`、`sync_changes=43`；Supabase 同步前为 `workspaces=1`、`devices=1`、`fields=0`、`tags=0`、`notes=0`、`note_revisions=0`、`note_tags=0`、`note_links` 无法读取、`sync_changes=37`。调用 `/sync/run` 返回失败：Supabase/PostgREST 报 `PGRST205`，远端 schema cache 中找不到 `public.note_links` 表。该失败不能按缺失表局部修补处理，正确结论是远端 schema contract 与本地 `zembra-schema` 契约不一致；后续必须先完成 Stage #2A 的远端整体 contract 检查与迁移，再重新执行真实同步验收。
 
 ### Task #13: 执行第二验收：新数据真实同步到 Supabase
 

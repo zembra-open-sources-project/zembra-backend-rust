@@ -18,6 +18,7 @@
 | --- | --- |
 | 已有数据同步 | 当前本地已有九张同步表数据必须真实写入 Supabase |
 | 远端数据拉取 | Supabase 有而本地没有的数据必须拉取到本地 |
+| schema 一致性 | 数据同步前，本地 SQLite 与远端 Supabase/Postgres 必须处在同一个 `zembra-schema` 契约版本 |
 | 差异比较 | 每次同步先读取本地和远端九张表，再按主键或复合主键比较差异 |
 | 时间顺序 | 两端字段不一致时，以对应实体的 `sync_changes.created_at` 时间顺序判断较新状态 |
 | 写入安全 | 按外键依赖顺序写入，避免关系表早于主表导致失败 |
@@ -30,6 +31,8 @@ In Scope：
 | 范围 | 内容 |
 | --- | --- |
 | 同步表 | `workspaces`、`devices`、`fields`、`tags`、`notes`、`note_revisions`、`note_tags`、`note_links`、`sync_changes` |
+| schema contract 检查 | 同步前读取本地与远端 schema contract version，确认两端一致 |
+| 远端契约迁移 | 当远端 contract version 落后时，由后端执行 `vendor/zembra-schema/postgres/` 既有迁移把远端整体迁到目标版本 |
 | 本地读取 | 从 SQLite 读取九张同步表完整当前状态 |
 | 远端读取 | 通过 Supabase REST/PostgREST 读取九张同步表完整当前状态 |
 | 差异处理 | 本地缺失、远端缺失、字段不同、关系不同都必须进入差异处理 |
@@ -44,8 +47,9 @@ Out of Scope：
 | --- | --- |
 | `sync_state` | 不作为同步表，只可继续作为本地同步游标或运行状态 |
 | `sync_conflicts` | 不作为同步表，只可作为冲突记录 |
-| schema 修改 | 不修改 `zembra-schema`，不新增本仓 schema、migration、DDL、字段、索引或约束 |
-| Supabase 平台能力 | 不使用 Supabase trigger、function、Realtime 或直接远端 Postgres 连接 |
+| schema 定义 | 不修改 `zembra-schema`，不在本仓新增、复制或手写业务 schema、migration、DDL、字段、索引或约束 |
+| schema 局部修补 | 不按缺失表或缺失字段做局部补丁，不把 `note_links` 当特殊 case |
+| Supabase 平台能力 | 不使用 Supabase trigger、function 或 Realtime |
 | 附件 | 不同步附件二进制或 `attachments` 表 |
 | 多 workspace | 不扩展多 workspace 选择或隔离策略 |
 | 冲突 UI | 不提供人工冲突处理界面 |
@@ -54,7 +58,37 @@ Out of Scope：
 
 ### 总体流程
 
-真实同步由一个完整流程完成：读取本地九张表，读取 Supabase 九张表，按表主键或复合主键建立对应关系，计算本地缺失、远端缺失、字段不同和关系不同，按 `sync_changes.created_at` 判断字段差异方向，按固定顺序写入本地或远端，写入后重新读取两端并确认差异为空。`push`、`pull`、`run_once` 可以保留现有 API 名称，但实现语义必须服务于真实同步，而不是只处理游标后的 `sync_changes`。
+真实同步由一个完整流程完成：先读取本地 schema contract version，再读取远端 Supabase/Postgres schema contract version；两端一致时才读取本地九张表和 Supabase 九张表，按表主键或复合主键建立对应关系，计算本地缺失、远端缺失、字段不同和关系不同，按 `sync_changes.created_at` 判断字段差异方向，按固定顺序写入本地或远端，写入后重新读取两端并确认差异为空。两端 schema contract 不一致时，普通同步必须停止，后端应通过正式远端 schema migration 能力执行 `vendor/zembra-schema/postgres/` 既有迁移，把远端整体迁到目标契约版本后再重新进入同步流程。`push`、`pull`、`run_once` 可以保留现有 API 名称，但实现语义必须服务于真实同步，而不是只处理游标后的 `sync_changes`。
+
+### Schema Contract 一致性设计
+
+本地 SQLite 和远端 Supabase/Postgres 必须共享同一个 `zembra-schema` contract version。后端同步前先读取本地 `schema_migrations` 中的当前版本，再通过管理员级 Postgres/Supabase migration 连接读取远端 `schema_migrations` 当前版本；版本一致才允许进入数据快照读取。版本不一致时，后端不检查某几张表是否存在，也不补某张特定表，而是执行 `vendor/zembra-schema/postgres/` 中已有的完整迁移路径，使远端整体达到目标契约版本。迁移来源只能是 `vendor/zembra-schema`，后端代码不得内嵌或复制 DDL。
+
+```mermaid
+flowchart TD
+    A["启动同步"] --> B["读取本地 schema contract version"]
+    B --> C["读取远端 Supabase/Postgres schema contract version"]
+    C --> D{"本地与远端 schema version 是否一致？"}
+    D -- "一致" --> E["读取本地九张同步表快照"]
+    D -- "不一致" --> F["停止普通同步"]
+    F --> G["执行远端 schema migration"]
+    G --> H["migration 来源只能是 vendor/zembra-schema/postgres"]
+    H --> I["重新读取远端 schema contract version"]
+    I --> D
+    E --> J["读取远端九张同步表快照"]
+    J --> K["按主键或复合主键比较两端数据"]
+    K --> L{"是否存在字段差异？"}
+    L -- "无字段差异，只有单边缺失" --> M["缺本地则写本地，缺远端则写远端"]
+    L -- "有字段差异" --> N["按 sync_changes.created_at 判断较新状态"]
+    N --> O{"能否判断方向？"}
+    O -- "能" --> M
+    O -- "不能" --> P["停止该实体同步并记录冲突"]
+    M --> Q["按外键顺序写入差异"]
+    Q --> R["重新读取本地和远端快照"]
+    R --> S{"两端数据是否一致？"}
+    S -- "一致" --> T["同步成功"]
+    S -- "不一致" --> U["同步失败，报告剩余差异"]
+```
 
 ### 同步表与主键
 
@@ -119,6 +153,8 @@ Out of Scope：
 
 | 用例 | 预期 |
 | --- | --- |
+| schema contract version 读取 | 能分别读取本地与远端 contract version，不用表存在性检查替代版本检查 |
+| 远端 contract migration | 只执行 `vendor/zembra-schema/postgres/` 既有迁移，不生成局部补表 SQL |
 | 本地快照读取 | 能读取九张同步表，排序稳定，字段完整 |
 | Supabase 请求构造 | 九张表 GET、upsert、delete 请求路径、header、filter、order 正确 |
 | 差异计算 | 覆盖本地缺失、远端缺失、字段相同、字段不同、无法判断方向 |
@@ -130,6 +166,7 @@ Out of Scope：
 
 | 用例 | 预期 |
 | --- | --- |
+| 真实 Supabase schema contract | 本地与远端 contract version 一致后才进入数据同步验收 |
 | 真实 Supabase 已有数据同步 | 当前本地已有九张表数据真实出现在 Supabase 九张表 |
 | 真实 Supabase 远端拉取 | Supabase 多出的九张表数据真实拉回本地 |
 | 真实 Supabase 新数据同步 | 第一验收通过后，新建数据同步到 Supabase 业务表和 `sync_changes` |
