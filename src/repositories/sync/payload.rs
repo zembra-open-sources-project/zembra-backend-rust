@@ -1,7 +1,7 @@
 use serde_json::Value;
 
 /// Payload for remote field insertion.
-pub(crate) struct FieldPayload<'a> {
+pub(super) struct FieldPayload<'a> {
     /// Field ID.
     pub id: &'a str,
     /// Field name.
@@ -11,7 +11,7 @@ pub(crate) struct FieldPayload<'a> {
 }
 
 /// Payload for remote tag insertion.
-pub(crate) struct TagPayload<'a> {
+pub(super) struct TagPayload<'a> {
     /// Tag ID.
     pub id: &'a str,
     /// Tag name.
@@ -27,7 +27,7 @@ pub(crate) struct TagPayload<'a> {
 }
 
 /// Payload for remote note upsert operations.
-pub(crate) struct NotePayload<'a> {
+pub(super) struct NotePayload<'a> {
     /// Note ID.
     pub id: &'a str,
     /// Note content.
@@ -49,7 +49,7 @@ pub(crate) struct NotePayload<'a> {
 }
 
 /// Payload for remote note revision insertion.
-pub(crate) struct NoteRevisionPayload<'a> {
+pub(super) struct NoteRevisionPayload<'a> {
     /// Revision ID.
     pub id: &'a str,
     /// Parent note ID.
@@ -67,7 +67,7 @@ pub(crate) struct NoteRevisionPayload<'a> {
 }
 
 /// Payload for remote note tag relation changes.
-pub(crate) struct NoteTagPayload<'a> {
+pub(super) struct NoteTagPayload<'a> {
     /// Note ID.
     pub note_id: &'a str,
     /// Tag ID.
@@ -77,7 +77,7 @@ pub(crate) struct NoteTagPayload<'a> {
 }
 
 /// Payload for remote note link attachment.
-pub(crate) struct NoteLinkAttachPayload<'a> {
+pub(super) struct NoteLinkAttachPayload<'a> {
     /// Link ID.
     pub id: &'a str,
     /// Source note ID.
@@ -93,7 +93,7 @@ pub(crate) struct NoteLinkAttachPayload<'a> {
 }
 
 /// Payload for remote note link detachment.
-pub(crate) struct NoteLinkDetachPayload<'a> {
+pub(super) struct NoteLinkDetachPayload<'a> {
     /// Link ID.
     pub id: &'a str,
 }

@@ -3,7 +3,7 @@ use sqlx::{Executor, Sqlite, Transaction};
 mod apply;
 mod ids;
 mod outbox;
-pub(crate) mod payload;
+mod payload;
 mod state;
 mod types;
 
