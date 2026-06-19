@@ -229,7 +229,7 @@
 
 ### Task #11: 准备真实同步验证脚本或手工检查命令
 
-**Status:** Designed
+**Status:** Finished
 
 **文件：**
 - 创建：`scripts/verify_r028_real_sync.sh`
@@ -238,7 +238,7 @@
 - 功能：提供只读取和同步现有数据的真实验收流程，避免再制造随机数据。
 - 实现说明：脚本只能使用当前 `.zembra.env` 或现有配置读取本地数据库和 Supabase 配置；第一阶段只统计本地已有九张表记录数、执行真实同步、再读取 Supabase 九张表记录数和关键 ID；不得插入随机 note。第二阶段必须在第一阶段通过后，由用户明确触发新数据路径，或使用应用正式 API 创建一条新数据后再同步验证。
 - 预期验证结果：脚本输出本地与 Supabase 九张表记录数、缺失 ID 列表和最终一致性结果；输出中不能把单元测试通过写成验收通过。
-- 完成时间：2026-06-19，已创建 `scripts/verify_r028_real_sync.sh` 并通过 `bash -n scripts/verify_r028_real_sync.sh`。
+- 完成时间：2026-06-19，已创建 `scripts/verify_r028_real_sync.sh` 并通过 `bash -n scripts/verify_r028_real_sync.sh`；脚本会读取当前本地 SQLite 和 Supabase 真实数据，先报告本地和远端 schema contract version，contract 不一致时跳过无意义的九表比对并执行真实 `/sync/run`，同步后重新读取 contract version，contract 一致后按九张同步表的完整行数据而非 count 做最终比较。脚本不制造随机数据；如需临时启用远端 contract migration，可通过 `ZEMBRA_SYNC_MIGRATE_REMOTE_SCHEMA=true` 和 `ZEMBRA_SYNC_REMOTE_DATABASE_URL` 启动本次验证，不写入用户真实 `~/.zembra.env`。
 
 ### Task #12: 执行第一验收：已有数据真实同步到 Supabase
 
@@ -252,7 +252,7 @@
 - 功能：把当前本地已经存在的笔记和相关数据真实同步到 Supabase。
 - 实现说明：禁止制造随机数据；禁止只看 `sync_changes`；必须确认 Supabase 中九张表都出现本地已有数据对应记录。若远端存在本地没有的数据，也必须验证被拉回本地。
 - 预期验证结果：Supabase 九张表与本地九张表在主键集合和字段值上达到一致，计划中记录真实 Supabase 验证时间、命令摘要和结果。
-- 验证记录：2026-06-19 真实执行 `./scripts/verify_r028_real_sync.sh`。本地已有数据为 `workspaces=1`、`devices=1`、`fields=4`、`tags=11`、`notes=21`、`note_revisions=24`、`note_tags=10`、`note_links=1`、`sync_changes=43`；Supabase 同步前为 `workspaces=1`、`devices=1`、`fields=0`、`tags=0`、`notes=0`、`note_revisions=0`、`note_tags=0`、`note_links` 无法读取、`sync_changes=37`。调用 `/sync/run` 返回失败：Supabase/PostgREST 报 `PGRST205`，远端 schema cache 中找不到 `public.note_links` 表。该失败不能按缺失表局部修补处理，正确结论是远端 schema contract 与本地 `zembra-schema` 契约不一致；后续必须先完成 Stage #2A 的远端整体 contract 检查与迁移，再重新执行真实同步验收。
+- 验证记录：2026-06-19 真实执行 `./scripts/verify_r028_real_sync.sh`。本地 contract 为 `0.5.0`，远端 contract 为 `missing`，脚本未继续做九表比对，真实调用 `/sync/run` 返回失败：`schema contract mismatch: local=0.5.0, remote=missing, expected=0.5.0`。当前结果不是验收通过；下一次真实验收必须先让后端使用管理员 Postgres 连接执行 `vendor/zembra-schema` 的远端 contract migration，或让远端先达到同一 contract version，再重新执行本脚本并观察九表完整行数据一致。
 
 ### Task #13: 执行第二验收：新数据真实同步到 Supabase
 
