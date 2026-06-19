@@ -506,3 +506,17 @@ async fn write_local_table_snapshot_upserts_remote_rows() {
             .any(|row| row.id == "change-remote")
     );
 }
+
+#[tokio::test]
+async fn local_schema_contract_version_reads_current_version() {
+    let database = Database::connect("sqlite://:memory:").await.unwrap();
+    let repository = SyncRepository::new(database.pool.clone());
+
+    let version = repository
+        .local_schema_contract_version()
+        .await
+        .unwrap()
+        .unwrap();
+
+    assert_eq!(version, "0.5.0");
+}

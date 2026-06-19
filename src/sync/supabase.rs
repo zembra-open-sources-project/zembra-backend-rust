@@ -139,6 +139,30 @@ impl SupabaseClient {
         ensure_success(response).await
     }
 
+    /// Fetches the remote Supabase/Postgres schema contract version.
+    ///
+    /// # Returns
+    ///
+    /// Returns the highest remote schema migration version.
+    pub async fn fetch_schema_contract_version(&self) -> Result<Option<String>, SupabaseError> {
+        let request = self.build_fetch_schema_contract_version_request()?;
+        let response = self.client.execute(request).await?;
+        if !response.status().is_success() {
+            if response.status().as_u16() == 404 {
+                return Ok(None);
+            }
+            return Err(SupabaseError::Status {
+                status: response.status().as_u16(),
+                body: response.text().await.unwrap_or_default(),
+            });
+        }
+
+        let rows = response
+            .json::<Vec<SupabaseSchemaMigrationRecord>>()
+            .await?;
+        Ok(rows.into_iter().next().map(|row| row.version))
+    }
+
     /// Fetches all synchronized table rows from Supabase.
     ///
     /// # Returns
@@ -334,6 +358,26 @@ impl SupabaseClient {
                 ("or", format!("(created_at.gt.{created_after},and(created_at.eq.{created_after},id.gt.{change_id_after}))")),
                 ("order", "created_at.asc,id.asc".to_string()),
                 ("limit", limit.to_string()),
+            ])
+            .build()
+            .map_err(Into::into)
+    }
+
+    /// Builds a schema contract version fetch request.
+    ///
+    /// # Returns
+    ///
+    /// Returns a request ready to execute.
+    pub fn build_fetch_schema_contract_version_request(
+        &self,
+    ) -> Result<reqwest::Request, SupabaseError> {
+        self.client
+            .get(format!("{}/rest/v1/schema_migrations", self.base_url))
+            .headers(self.headers()?)
+            .query(&[
+                ("select", "version"),
+                ("order", "version.desc"),
+                ("limit", "1"),
             ])
             .build()
             .map_err(Into::into)
@@ -554,6 +598,13 @@ impl SupabaseClient {
         let response = self.client.execute(request).await?;
         ensure_success(response).await
     }
+}
+
+/// Schema migration row returned by Supabase.
+#[derive(Debug, Clone, Deserialize)]
+struct SupabaseSchemaMigrationRecord {
+    /// Schema contract version.
+    version: String,
 }
 
 /// Sync change representation used for Supabase JSON payloads.
@@ -790,6 +841,20 @@ mod tests {
         assert!(url.contains("workspace_id=eq."));
         assert!(url.contains("device_id=neq.local-backend"));
         assert!(url.contains("limit=25"));
+    }
+
+    #[test]
+    fn schema_contract_request_targets_schema_migrations() {
+        let client = SupabaseClient::new("https://example.supabase.co", "sb_secret_test-key");
+        let request = client
+            .build_fetch_schema_contract_version_request()
+            .unwrap();
+        let url = request.url().as_str();
+
+        assert!(url.starts_with("https://example.supabase.co/rest/v1/schema_migrations?"));
+        assert!(url.contains("select=version"));
+        assert!(url.contains("order=version.desc"));
+        assert!(url.contains("limit=1"));
     }
 
     #[test]

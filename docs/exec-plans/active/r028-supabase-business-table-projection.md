@@ -52,7 +52,7 @@
 
 ### Task #16: 设计并实现本地与远端 schema contract version 读取
 
-**Status:** Designed
+**Status:** Finished
 
 **文件：**
 - 创建：`src/sync/schema_contract.rs`
@@ -63,10 +63,11 @@
 - 功能：同步前读取本地 SQLite 与远端 Supabase/Postgres 的 schema contract version。
 - 实现说明：本地版本读取 `schema_migrations` 当前最高或目标版本；远端版本必须读取远端 `schema_migrations`，不能通过检查九张同步表是否存在来替代。远端读取需要管理员级 Postgres/Supabase migration 连接配置，不能复用只适合 PostgREST 数据访问的 Supabase REST `secret_key` 来执行 DDL。
 - 预期验证结果：自动化测试覆盖本地版本读取；远端读取封装有清晰错误类型；当远端版本缺失或低于本地目标版本时返回 schema contract mismatch。
+- 完成时间：2026-06-19，已通过 `cargo fmt --check`、`cargo test repositories::sync::tests::local_schema_contract_version_reads_current_version`、`cargo test sync::supabase::tests::schema_contract_request_targets_schema_migrations`、`cargo check`。
 
 ### Task #17: 实现远端 schema contract migration
 
-**Status:** Designed
+**Status:** Finished
 
 **文件：**
 - 创建：`src/sync/schema_migration.rs`
@@ -91,6 +92,7 @@
 - 功能：`/sync/run`、`/sync/push`、`/sync/pull` 在读取九张表前先执行 schema contract gate。
 - 实现说明：schema contract 一致时进入已有快照同步流程；不一致且不能迁移时返回同步失败；迁移成功后重新读取远端 contract version，再进入同步流程。脚本验收必须先报告两端 schema contract version，再报告九张表数据一致性。
 - 预期验证结果：路由测试覆盖 schema mismatch 返回失败；真实验收脚本输出本地/远端 contract version，且不再把 `note_links` 缺失表作为局部修补目标。
+- 完成时间：2026-06-19，已通过 `cargo fmt --check`、`cargo test sync_routes`、`cargo check`；真实脚本显示本地 contract 为 `0.5.0`，远端缺少 `schema_migrations` contract 表，`/sync/run` 在读取九张表前返回 schema contract 失败。
 
 ## Stage #2: 本地九张表快照读取
 

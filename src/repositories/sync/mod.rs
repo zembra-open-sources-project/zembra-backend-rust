@@ -36,6 +36,19 @@ impl SyncRepository {
     pub fn new(pool: sqlx::SqlitePool) -> Self {
         Self { pool }
     }
+
+    /// Reads the local SQLite schema contract version.
+    ///
+    /// # Returns
+    ///
+    /// Returns the highest schema migration version recorded locally.
+    pub async fn local_schema_contract_version(&self) -> Result<Option<String>, sqlx::Error> {
+        sqlx::query_scalar::<_, String>(
+            "SELECT version FROM schema_migrations ORDER BY version DESC LIMIT 1",
+        )
+        .fetch_optional(&self.pool)
+        .await
+    }
 }
 
 /// Ensures the default backend device exists for sync change foreign keys.

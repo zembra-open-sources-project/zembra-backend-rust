@@ -231,7 +231,8 @@ fn sync_error_to_api_error(error: crate::services::sync::SyncError) -> ApiError 
             ApiError::SyncFailed(error.to_string())
         }
         crate::services::sync::SyncError::Conflict { .. }
-        | crate::services::sync::SyncError::NotConverged { .. } => {
+        | crate::services::sync::SyncError::NotConverged { .. }
+        | crate::services::sync::SyncError::SchemaContractMismatch { .. } => {
             ApiError::SyncFailed(error.to_string())
         }
     }

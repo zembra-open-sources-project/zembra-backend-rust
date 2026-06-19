@@ -66,9 +66,23 @@ remote_count() {
   awk 'BEGIN{IGNORECASE=1} /^content-range:/ {print $2}' /tmp/zembra-r028-count.headers | awk -F/ '{print $2}' | tr -d '\r'
 }
 
+local_schema_version() {
+  sqlite3 "$DATABASE_PATH" "SELECT version FROM schema_migrations ORDER BY version DESC LIMIT 1;"
+}
+
+remote_schema_version() {
+  curl -sS \
+    -H "apikey: $SUPABASE_SECRET_KEY" \
+    -H "Authorization: Bearer $SUPABASE_SECRET_KEY" \
+    "$SUPABASE_URL/rest/v1/schema_migrations?select=version&order=version.desc&limit=1" \
+    | python3 -c 'import json,sys; data=json.load(sys.stdin); print(data[0]["version"] if isinstance(data, list) and data else "missing")'
+}
+
 echo "r028 real sync verification"
 echo "database=$DATABASE_PATH"
 echo "supabase=$SUPABASE_URL"
+echo "local_schema_contract=$(local_schema_version)"
+echo "remote_schema_contract=$(remote_schema_version)"
 echo
 echo "before sync"
 for table in "${TABLES[@]}"; do

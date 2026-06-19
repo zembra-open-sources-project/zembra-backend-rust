@@ -1,6 +1,7 @@
 use crate::config::SyncSettings;
 use crate::repositories::sync::{SyncRepository, SyncStateRecord};
 use crate::sync::diff::{SyncDiffConflict, diff_snapshots};
+use crate::sync::schema_contract::{SchemaContractVersions, TARGET_SCHEMA_CONTRACT_VERSION};
 use crate::sync::supabase::{SupabaseClient, SupabaseError};
 use std::sync::{Arc, RwLock};
 
@@ -79,6 +80,7 @@ impl SyncService {
         let settings = self.settings();
         self.ensure_enabled(&settings)?;
         let supabase = SupabaseClient::from_settings(&settings);
+        self.ensure_schema_contract_ready(&supabase).await?;
         let (local, remote) = self.read_snapshots(&supabase).await?;
         let diff = diff_snapshots(&local, &remote);
         self.ensure_no_conflicts(&diff.conflicts)?;
@@ -99,6 +101,7 @@ impl SyncService {
         let settings = self.settings();
         self.ensure_enabled(&settings)?;
         let supabase = SupabaseClient::from_settings(&settings);
+        self.ensure_schema_contract_ready(&supabase).await?;
         let (local, remote) = self.read_snapshots(&supabase).await?;
         let diff = diff_snapshots(&local, &remote);
         self.ensure_no_conflicts(&diff.conflicts)?;
@@ -146,6 +149,7 @@ impl SyncService {
         let settings = self.settings();
         self.ensure_enabled(&settings)?;
         let supabase = SupabaseClient::from_settings(&settings);
+        self.ensure_schema_contract_ready(&supabase).await?;
         let (local, remote) = self.read_snapshots(&supabase).await?;
         let diff = diff_snapshots(&local, &remote);
         self.ensure_no_conflicts(&diff.conflicts)?;
@@ -186,6 +190,41 @@ impl SyncService {
         let local = self.repository.read_local_table_snapshot().await?;
         let remote = supabase.fetch_table_snapshot().await?;
         Ok((local, remote))
+    }
+
+    /// Ensures local and remote schema contracts are ready for table sync.
+    ///
+    /// # Arguments
+    ///
+    /// * `supabase` - Supabase REST client.
+    ///
+    /// # Returns
+    ///
+    /// Returns `Ok(())` when both sides are at the target contract version.
+    async fn ensure_schema_contract_ready(
+        &self,
+        supabase: &SupabaseClient,
+    ) -> Result<(), SyncError> {
+        let local = self
+            .repository
+            .local_schema_contract_version()
+            .await?
+            .unwrap_or_else(|| "missing".to_string());
+        let remote = supabase
+            .fetch_schema_contract_version()
+            .await?
+            .unwrap_or_else(|| "missing".to_string());
+        let versions = SchemaContractVersions { local, remote };
+
+        if versions.is_ready() {
+            Ok(())
+        } else {
+            Err(SyncError::SchemaContractMismatch {
+                local: versions.local,
+                remote: versions.remote,
+                expected: TARGET_SCHEMA_CONTRACT_VERSION.to_string(),
+            })
+        }
     }
 
     /// Writes a partial snapshot to Supabase and records push failures locally.
@@ -366,5 +405,15 @@ pub enum SyncError {
         write_remote: usize,
         /// Remaining conflict count.
         conflicts: usize,
+    },
+    /// Local and remote schema contracts do not match the backend target version.
+    #[error("schema contract mismatch: local={local}, remote={remote}, expected={expected}")]
+    SchemaContractMismatch {
+        /// Local SQLite schema contract version.
+        local: String,
+        /// Remote Supabase/Postgres schema contract version.
+        remote: String,
+        /// Expected contract version.
+        expected: String,
     },
 }
