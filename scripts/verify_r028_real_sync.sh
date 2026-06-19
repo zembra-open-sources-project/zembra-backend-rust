@@ -78,8 +78,8 @@ def load_config():
         migrate_remote_schema = bool(config.get("sync", {}).get("migrate_remote_schema", False))
     else:
         migrate_remote_schema = migrate_remote_schema.strip().lower() in {"1", "true", "yes", "on"}
-    remote_database_url = os.environ.get("ZEMBRA_SYNC_REMOTE_DATABASE_URL") or str(
-        config.get("sync", {}).get("remote_database_url", "")
+    remote_database_password = os.environ.get("ZEMBRA_SYNC_REMOTE_DATABASE_PASSWORD") or str(
+        config.get("sync", {}).get("remote_database_password", "")
     )
 
     if not database_path.startswith("/"):
@@ -90,7 +90,7 @@ def load_config():
         secret_key,
         sync_enabled,
         migrate_remote_schema,
-        remote_database_url,
+        remote_database_password,
     )
 
 
@@ -99,7 +99,7 @@ def toml_string(value):
     return json.dumps(str(value))
 
 
-def write_runtime_config(home, database_path, supabase_url, secret_key, sync_enabled, migrate_remote_schema, remote_database_url):
+def write_runtime_config(home, database_path, supabase_url, secret_key, sync_enabled, migrate_remote_schema, remote_database_password):
     """Write a temporary backend config without modifying the user's real config file."""
     config_path = Path(home) / ".zembra.env"
     config_path.write_text(
@@ -123,7 +123,7 @@ def write_runtime_config(home, database_path, supabase_url, secret_key, sync_ena
                 f"supabase_url = {toml_string(supabase_url)}",
                 f"secret_key = {toml_string(secret_key)}",
                 f"migrate_remote_schema = {str(migrate_remote_schema).lower()}",
-                f"remote_database_url = {toml_string(remote_database_url)}",
+                f"remote_database_password = {toml_string(remote_database_password)}",
                 "",
             ]
         ),
@@ -276,7 +276,7 @@ def main():
         secret_key,
         sync_enabled,
         migrate_remote_schema,
-        remote_database_url,
+        remote_database_password,
     ) = load_config()
     if not database_path.exists():
         raise RuntimeError(f"local database not found: {database_path}")
@@ -311,7 +311,7 @@ def main():
         secret_key,
         sync_enabled,
         migrate_remote_schema,
-        remote_database_url,
+        remote_database_password,
     )
     server_env = {**os.environ, "HOME": runtime_home.name}
     server_log_path = Path(runtime_home.name) / "zembra-r028-server.log"

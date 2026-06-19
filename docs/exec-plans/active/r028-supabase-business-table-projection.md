@@ -238,7 +238,7 @@
 - 功能：提供只读取和同步现有数据的真实验收流程，避免再制造随机数据。
 - 实现说明：脚本只能使用当前 `.zembra.env` 或现有配置读取本地数据库和 Supabase 配置；第一阶段只统计本地已有九张表记录数、执行真实同步、再读取 Supabase 九张表记录数和关键 ID；不得插入随机 note。第二阶段必须在第一阶段通过后，由用户明确触发新数据路径，或使用应用正式 API 创建一条新数据后再同步验证。
 - 预期验证结果：脚本输出本地与 Supabase 九张表记录数、缺失 ID 列表和最终一致性结果；输出中不能把单元测试通过写成验收通过。
-- 完成时间：2026-06-19，已创建 `scripts/verify_r028_real_sync.sh` 并通过 `bash -n scripts/verify_r028_real_sync.sh`；脚本会读取当前本地 SQLite 和 Supabase 真实数据，先报告本地和远端 schema contract version，contract 不一致时跳过无意义的九表比对并执行真实 `/sync/run`，同步后重新读取 contract version，contract 一致后按九张同步表的完整行数据而非 count 做最终比较。脚本不制造随机数据；如需临时启用远端 contract migration，可通过 `ZEMBRA_SYNC_MIGRATE_REMOTE_SCHEMA=true` 和 `ZEMBRA_SYNC_REMOTE_DATABASE_URL` 启动本次验证，不写入用户真实 `~/.zembra.env`。
+- 完成时间：2026-06-19，已创建 `scripts/verify_r028_real_sync.sh` 并通过 `bash -n scripts/verify_r028_real_sync.sh`；脚本会读取当前本地 SQLite 和 Supabase 真实数据，先报告本地和远端 schema contract version，contract 不一致时跳过无意义的九表比对并执行真实 `/sync/run`，同步后重新读取 contract version，contract 一致后按九张同步表的完整行数据而非 count 做最终比较。脚本不制造随机数据；如需临时启用远端 contract migration，可通过 `ZEMBRA_SYNC_MIGRATE_REMOTE_SCHEMA=true` 和 `ZEMBRA_SYNC_REMOTE_DATABASE_PASSWORD` 启动本次验证，不写入用户真实 `~/.zembra.env`，后端会根据 `supabase_url` 拼接 Postgres 连接 URL。
 
 ### Task #12: 执行第一验收：已有数据真实同步到 Supabase
 

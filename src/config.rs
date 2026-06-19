@@ -90,9 +90,9 @@ pub struct SyncSettings {
     /// Whether the backend may apply remote schema contract migrations.
     #[serde(default)]
     pub migrate_remote_schema: bool,
-    /// Administrator Postgres connection URL used only for remote schema migrations.
+    /// Supabase database password used only for remote schema migrations.
     #[serde(default)]
-    pub remote_database_url: String,
+    pub remote_database_password: String,
 }
 
 impl Default for LoggingSettings {
@@ -122,7 +122,7 @@ impl Default for SyncSettings {
             supabase_url: String::new(),
             secret_key: String::new(),
             migrate_remote_schema: false,
-            remote_database_url: String::new(),
+            remote_database_password: String::new(),
         }
     }
 }
@@ -350,9 +350,9 @@ impl SyncSettings {
                 ));
             }
 
-            if self.migrate_remote_schema && self.remote_database_url.trim().is_empty() {
+            if self.migrate_remote_schema && self.remote_database_password.trim().is_empty() {
                 return Err(config::ConfigError::Message(
-                    "sync.remote_database_url is required when sync.migrate_remote_schema is true"
+                    "sync.remote_database_password is required when sync.migrate_remote_schema is true"
                         .to_string(),
                 ));
             }
@@ -530,7 +530,7 @@ mod tests {
             supabase_url: "   ".to_string(),
             secret_key: "sb_secret_test-key".to_string(),
             migrate_remote_schema: false,
-            remote_database_url: String::new(),
+            remote_database_password: String::new(),
         };
 
         assert!(settings.validate().is_err());
@@ -544,7 +544,7 @@ mod tests {
             supabase_url: "https://example.supabase.co".to_string(),
             secret_key: "   ".to_string(),
             migrate_remote_schema: false,
-            remote_database_url: String::new(),
+            remote_database_password: String::new(),
         };
 
         assert!(settings.validate().is_err());
@@ -558,7 +558,7 @@ mod tests {
             supabase_url: "https://example.supabase.co".to_string(),
             secret_key: "eyJlegacy.jwt.service-role".to_string(),
             migrate_remote_schema: false,
-            remote_database_url: String::new(),
+            remote_database_password: String::new(),
         };
 
         assert!(settings.validate().is_err());
@@ -572,7 +572,21 @@ mod tests {
             supabase_url: String::new(),
             secret_key: String::new(),
             migrate_remote_schema: false,
-            remote_database_url: String::new(),
+            remote_database_password: String::new(),
+        };
+
+        assert!(settings.validate().is_err());
+    }
+
+    #[test]
+    fn remote_schema_migration_requires_database_password() {
+        let settings = SyncSettings {
+            enabled: true,
+            interval_seconds: 60,
+            supabase_url: "https://example.supabase.co".to_string(),
+            secret_key: "sb_secret_test-key".to_string(),
+            migrate_remote_schema: true,
+            remote_database_password: "   ".to_string(),
         };
 
         assert!(settings.validate().is_err());

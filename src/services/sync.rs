@@ -217,7 +217,11 @@ impl SyncService {
         }
 
         if settings.migrate_remote_schema {
-            apply_remote_schema_contract(&settings.remote_database_url).await?;
+            apply_remote_schema_contract(
+                &settings.supabase_url,
+                &settings.remote_database_password,
+            )
+            .await?;
             let versions = self.read_schema_contract_versions(supabase).await?;
             if versions.is_ready() {
                 return Ok(());
