@@ -52,7 +52,7 @@
 
 ### Task #3: 定义同步表数据模型和主键规则
 
-**Status:** Designed
+**Status:** Finished
 
 **文件：**
 - 创建：`src/sync/table_snapshot.rs`
@@ -100,10 +100,11 @@
 - 功能：通过 Supabase REST/PostgREST 读取九张同步表的远端当前数据。
 - 实现说明：为九张表分别建立 GET 请求构造和响应解析，统一使用认证 header、`workspace_id` 过滤和稳定排序；`sync_changes` 必须按 `created_at ASC, id ASC` 读取；大表读取必须支持分页或明确批量上限，不能只取默认第一页。请求构造测试只验证 URL、header、filter、order、limit/range，不作为真实验收。
 - 预期验证结果：`cargo test sync::supabase` 通过；请求路径覆盖 `workspaces`、`devices`、`fields`、`tags`、`notes`、`note_revisions`、`note_tags`、`note_links`、`sync_changes`。
+- 完成时间：2026-06-19，已通过 `cargo fmt --check`、`cargo test sync::supabase`、`cargo check`。
 
 ### Task #6: 扩展 Supabase REST client 的表写入和删除
 
-**Status:** Designed
+**Status:** Finished
 
 **文件：**
 - 修改：`src/sync/supabase.rs`
@@ -112,6 +113,7 @@
 - 功能：通过 Supabase REST/PostgREST 对九张同步表执行 upsert 和必要 delete。
 - 实现说明：普通实体和 `sync_changes` 使用 upsert；关系解除使用 delete；写入顺序必须满足外键依赖：`workspaces`、`devices`、`fields`、`tags`、`notes`、`note_revisions`、`note_tags`、`note_links`、`sync_changes`。任何远端写入失败都必须返回错误，不能推进本地成功状态。
 - 预期验证结果：请求构造测试覆盖每张表的 upsert/delete 路径和 `Prefer: resolution=merge-duplicates`；`cargo test sync::supabase` 通过。
+- 完成时间：2026-06-19，已通过 `cargo fmt --check`、`cargo test sync::supabase`、`cargo check`。
 
 ## Stage #4: 差异比较与方向判断
 

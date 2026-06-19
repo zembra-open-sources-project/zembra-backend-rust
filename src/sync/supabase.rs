@@ -1,8 +1,14 @@
 use reqwest::header::{AUTHORIZATION, HeaderMap, HeaderValue};
+use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::repositories::sync::SyncChangeRecord;
+use crate::sync::table_snapshot::{
+    NoteLinkSnapshotRow, NoteTagSnapshotRow, SyncChangeSnapshotRow, SyncTableSnapshot,
+};
+
+const SUPABASE_PAGE_SIZE: usize = 1000;
 
 /// Supabase REST client for synchronization tables.
 #[derive(Debug, Clone)]
@@ -133,6 +139,93 @@ impl SupabaseClient {
         ensure_success(response).await
     }
 
+    /// Fetches all synchronized table rows from Supabase.
+    ///
+    /// # Returns
+    ///
+    /// Returns a remote snapshot for the nine synchronized tables.
+    pub async fn fetch_table_snapshot(&self) -> Result<SyncTableSnapshot, SupabaseError> {
+        Ok(SyncTableSnapshot {
+            workspaces: self.fetch_table_rows("workspaces", "id.asc", false).await?,
+            devices: self.fetch_table_rows("devices", "id.asc", true).await?,
+            fields: self.fetch_table_rows("fields", "id.asc", true).await?,
+            tags: self.fetch_table_rows("tags", "id.asc", true).await?,
+            notes: self.fetch_table_rows("notes", "id.asc", true).await?,
+            note_revisions: self
+                .fetch_table_rows("note_revisions", "id.asc", true)
+                .await?,
+            note_tags: self
+                .fetch_table_rows("note_tags", "workspace_id.asc,note_id.asc,tag_id.asc", true)
+                .await?,
+            note_links: self.fetch_table_rows("note_links", "id.asc", true).await?,
+            sync_changes: self
+                .fetch_table_rows("sync_changes", "created_at.asc,id.asc", true)
+                .await?,
+        })
+    }
+
+    /// Upserts synchronized table rows to Supabase in foreign-key order.
+    ///
+    /// # Arguments
+    ///
+    /// * `snapshot` - Rows to upsert.
+    ///
+    /// # Returns
+    ///
+    /// Returns `Ok(())` after all non-empty table batches are accepted.
+    pub async fn upsert_table_snapshot(
+        &self,
+        snapshot: &SyncTableSnapshot,
+    ) -> Result<(), SupabaseError> {
+        self.upsert_table_rows("workspaces", &snapshot.workspaces)
+            .await?;
+        self.upsert_table_rows("devices", &snapshot.devices).await?;
+        self.upsert_table_rows("fields", &snapshot.fields).await?;
+        self.upsert_table_rows("tags", &snapshot.tags).await?;
+        self.upsert_table_rows("notes", &snapshot.notes).await?;
+        self.upsert_table_rows("note_revisions", &snapshot.note_revisions)
+            .await?;
+        self.upsert_table_rows("note_tags", &snapshot.note_tags)
+            .await?;
+        self.upsert_table_rows("note_links", &snapshot.note_links)
+            .await?;
+        let sync_changes = supabase_snapshot_changes(&snapshot.sync_changes);
+        self.upsert_table_rows("sync_changes", &sync_changes)
+            .await?;
+
+        Ok(())
+    }
+
+    /// Deletes a note tag relation from Supabase.
+    ///
+    /// # Arguments
+    ///
+    /// * `row` - Relation row key to delete.
+    ///
+    /// # Returns
+    ///
+    /// Returns `Ok(())` after Supabase accepts the delete.
+    pub async fn delete_note_tag(&self, row: &NoteTagSnapshotRow) -> Result<(), SupabaseError> {
+        let request = self.build_delete_note_tag_request(row)?;
+        let response = self.client.execute(request).await?;
+        ensure_success(response).await
+    }
+
+    /// Deletes a note link from Supabase.
+    ///
+    /// # Arguments
+    ///
+    /// * `row` - Link row key to delete.
+    ///
+    /// # Returns
+    ///
+    /// Returns `Ok(())` after Supabase accepts the delete.
+    pub async fn delete_note_link(&self, row: &NoteLinkSnapshotRow) -> Result<(), SupabaseError> {
+        let request = self.build_delete_note_link_request(row)?;
+        let response = self.client.execute(request).await?;
+        ensure_success(response).await
+    }
+
     /// Builds an upsert request for sync changes.
     ///
     /// # Arguments
@@ -246,6 +339,128 @@ impl SupabaseClient {
             .map_err(Into::into)
     }
 
+    /// Builds a synchronized table fetch request.
+    ///
+    /// # Arguments
+    ///
+    /// * `table` - Supabase table name.
+    /// * `order` - PostgREST ordering expression.
+    /// * `workspace_scoped` - Whether to add the default workspace filter.
+    /// * `offset` - Zero-based page start.
+    /// * `limit` - Maximum rows for the page.
+    ///
+    /// # Returns
+    ///
+    /// Returns a request ready to execute.
+    pub fn build_fetch_table_request(
+        &self,
+        table: &str,
+        order: &str,
+        workspace_scoped: bool,
+        offset: usize,
+        limit: usize,
+    ) -> Result<reqwest::Request, SupabaseError> {
+        let mut request = self
+            .client
+            .get(format!("{}/rest/v1/{table}", self.base_url))
+            .headers(self.headers()?)
+            .query(&[("select", "*"), ("order", order)])
+            .header("Range-Unit", "items")
+            .header(
+                "Range",
+                format!(
+                    "{}-{}",
+                    offset,
+                    offset.saturating_add(limit).saturating_sub(1)
+                ),
+            );
+
+        if workspace_scoped {
+            request = request.query(&[(
+                "workspace_id",
+                format!("eq.{}", crate::repositories::taxonomy::DEFAULT_WORKSPACE_ID),
+            )]);
+        }
+
+        request.build().map_err(Into::into)
+    }
+
+    /// Builds a synchronized table upsert request.
+    ///
+    /// # Arguments
+    ///
+    /// * `table` - Supabase table name.
+    /// * `rows` - Rows to serialize as JSON.
+    ///
+    /// # Returns
+    ///
+    /// Returns a request ready to execute.
+    pub fn build_upsert_table_request<T>(
+        &self,
+        table: &str,
+        rows: &[T],
+    ) -> Result<reqwest::Request, SupabaseError>
+    where
+        T: Serialize,
+    {
+        self.client
+            .post(format!("{}/rest/v1/{table}", self.base_url))
+            .headers(self.headers()?)
+            .header("Prefer", "resolution=merge-duplicates")
+            .json(rows)
+            .build()
+            .map_err(Into::into)
+    }
+
+    /// Builds a note tag relation delete request.
+    ///
+    /// # Arguments
+    ///
+    /// * `row` - Relation row key to delete.
+    ///
+    /// # Returns
+    ///
+    /// Returns a request ready to execute.
+    pub fn build_delete_note_tag_request(
+        &self,
+        row: &NoteTagSnapshotRow,
+    ) -> Result<reqwest::Request, SupabaseError> {
+        self.client
+            .delete(format!("{}/rest/v1/note_tags", self.base_url))
+            .headers(self.headers()?)
+            .query(&[
+                ("workspace_id", format!("eq.{}", row.workspace_id)),
+                ("note_id", format!("eq.{}", row.note_id)),
+                ("tag_id", format!("eq.{}", row.tag_id)),
+            ])
+            .build()
+            .map_err(Into::into)
+    }
+
+    /// Builds a note link delete request.
+    ///
+    /// # Arguments
+    ///
+    /// * `row` - Link row key to delete.
+    ///
+    /// # Returns
+    ///
+    /// Returns a request ready to execute.
+    pub fn build_delete_note_link_request(
+        &self,
+        row: &NoteLinkSnapshotRow,
+    ) -> Result<reqwest::Request, SupabaseError> {
+        self.client
+            .delete(format!("{}/rest/v1/note_links", self.base_url))
+            .headers(self.headers()?)
+            .query(&[
+                ("workspace_id", format!("eq.{}", row.workspace_id)),
+                ("id", format!("eq.{}", row.id)),
+            ])
+            .build()
+            .map_err(Into::into)
+    }
+
     /// Builds authenticated Supabase headers.
     ///
     /// # Returns
@@ -263,6 +478,81 @@ impl SupabaseClient {
         );
 
         Ok(headers)
+    }
+
+    /// Fetches all rows for one synchronized table using paginated requests.
+    ///
+    /// # Arguments
+    ///
+    /// * `table` - Supabase table name.
+    /// * `order` - PostgREST ordering expression.
+    /// * `workspace_scoped` - Whether to filter by default workspace.
+    ///
+    /// # Returns
+    ///
+    /// Returns all fetched rows.
+    async fn fetch_table_rows<T>(
+        &self,
+        table: &str,
+        order: &str,
+        workspace_scoped: bool,
+    ) -> Result<Vec<T>, SupabaseError>
+    where
+        T: DeserializeOwned,
+    {
+        let mut offset = 0;
+        let mut rows = Vec::new();
+
+        loop {
+            let request = self.build_fetch_table_request(
+                table,
+                order,
+                workspace_scoped,
+                offset,
+                SUPABASE_PAGE_SIZE,
+            )?;
+            let response = self.client.execute(request).await?;
+            if !response.status().is_success() {
+                return Err(SupabaseError::Status {
+                    status: response.status().as_u16(),
+                    body: response.text().await.unwrap_or_default(),
+                });
+            }
+
+            let mut page = response.json::<Vec<T>>().await?;
+            let page_len = page.len();
+            rows.append(&mut page);
+
+            if page_len < SUPABASE_PAGE_SIZE {
+                break;
+            }
+            offset += SUPABASE_PAGE_SIZE;
+        }
+
+        Ok(rows)
+    }
+
+    /// Upserts rows for one synchronized table.
+    ///
+    /// # Arguments
+    ///
+    /// * `table` - Supabase table name.
+    /// * `rows` - Rows to upsert.
+    ///
+    /// # Returns
+    ///
+    /// Returns `Ok(())` after Supabase accepts the request.
+    async fn upsert_table_rows<T>(&self, table: &str, rows: &[T]) -> Result<(), SupabaseError>
+    where
+        T: Serialize,
+    {
+        if rows.is_empty() {
+            return Ok(());
+        }
+
+        let request = self.build_upsert_table_request(table, rows)?;
+        let response = self.client.execute(request).await?;
+        ensure_success(response).await
     }
 }
 
@@ -386,6 +676,35 @@ fn supabase_changes(changes: &[SyncChangeRecord]) -> Vec<SupabaseSyncChangeRecor
         .collect()
 }
 
+/// Converts sync change snapshot rows into Supabase JSON records.
+///
+/// # Arguments
+///
+/// * `changes` - Snapshot change rows.
+///
+/// # Returns
+///
+/// Returns records ready to serialize to Supabase.
+fn supabase_snapshot_changes(changes: &[SyncChangeSnapshotRow]) -> Vec<SupabaseSyncChangeRecord> {
+    changes
+        .iter()
+        .map(|change| SupabaseSyncChangeRecord {
+            id: change.id.clone(),
+            workspace_id: change.workspace_id.clone(),
+            device_id: change.device_id.clone(),
+            entity_type: change.entity_type.clone(),
+            entity_id: change.entity_id.clone(),
+            operation: change.operation.clone(),
+            base_revision_id: change.base_revision_id.clone(),
+            new_revision_id: change.new_revision_id.clone(),
+            payload: serde_json::from_str(&change.payload).unwrap_or(serde_json::Value::Null),
+            created_at: change.created_at,
+            applied_at: change.applied_at,
+            supabase_committed_at: change.supabase_committed_at,
+        })
+        .collect()
+}
+
 /// Error returned by Supabase synchronization requests.
 #[derive(Debug, thiserror::Error)]
 pub enum SupabaseError {
@@ -440,6 +759,7 @@ fn unix_timestamp() -> i64 {
 #[cfg(test)]
 mod tests {
     use super::SupabaseClient;
+    use crate::sync::table_snapshot::{FieldSnapshotRow, NoteLinkSnapshotRow, NoteTagSnapshotRow};
 
     #[test]
     fn upsert_request_contains_supabase_auth_headers() {
@@ -494,5 +814,85 @@ mod tests {
             "https://example.supabase.co/rest/v1/devices"
         );
         assert_eq!(request.headers()["prefer"], "resolution=merge-duplicates");
+    }
+
+    #[test]
+    fn table_fetch_request_uses_workspace_filter_order_and_range() {
+        let client = SupabaseClient::new("https://example.supabase.co", "sb_secret_test-key");
+        let request = client
+            .build_fetch_table_request(
+                "note_tags",
+                "workspace_id.asc,note_id.asc,tag_id.asc",
+                true,
+                1000,
+                1000,
+            )
+            .unwrap();
+        let url = request.url().as_str();
+
+        assert!(url.starts_with("https://example.supabase.co/rest/v1/note_tags?"));
+        assert!(url.contains("select="));
+        assert!(url.contains("workspace_id=eq."));
+        assert!(url.contains("order=workspace_id.asc"));
+        assert_eq!(request.headers()["range-unit"], "items");
+        assert_eq!(request.headers()["range"], "1000-1999");
+    }
+
+    #[test]
+    fn table_upsert_request_targets_business_table() {
+        let client = SupabaseClient::new("https://example.supabase.co", "sb_secret_test-key");
+        let rows = vec![FieldSnapshotRow {
+            id: "field-1".to_string(),
+            workspace_id: crate::repositories::taxonomy::DEFAULT_WORKSPACE_ID.to_string(),
+            name: "field".to_string(),
+            created_at: 123,
+        }];
+        let request = client.build_upsert_table_request("fields", &rows).unwrap();
+
+        assert_eq!(
+            request.url().as_str(),
+            "https://example.supabase.co/rest/v1/fields"
+        );
+        assert_eq!(request.headers()["prefer"], "resolution=merge-duplicates");
+    }
+
+    #[test]
+    fn note_tag_delete_request_filters_composite_key() {
+        let client = SupabaseClient::new("https://example.supabase.co", "sb_secret_test-key");
+        let row = NoteTagSnapshotRow {
+            workspace_id: crate::repositories::taxonomy::DEFAULT_WORKSPACE_ID.to_string(),
+            note_id: "note-1".to_string(),
+            tag_id: "tag-1".to_string(),
+            created_at: 123,
+        };
+        let request = client.build_delete_note_tag_request(&row).unwrap();
+        let url = request.url().as_str();
+
+        assert_eq!(request.method(), reqwest::Method::DELETE);
+        assert!(url.starts_with("https://example.supabase.co/rest/v1/note_tags?"));
+        assert!(url.contains("workspace_id=eq."));
+        assert!(url.contains("note_id=eq.note-1"));
+        assert!(url.contains("tag_id=eq.tag-1"));
+    }
+
+    #[test]
+    fn note_link_delete_request_filters_id() {
+        let client = SupabaseClient::new("https://example.supabase.co", "sb_secret_test-key");
+        let row = NoteLinkSnapshotRow {
+            id: "link-1".to_string(),
+            workspace_id: crate::repositories::taxonomy::DEFAULT_WORKSPACE_ID.to_string(),
+            source_note_id: "note-1".to_string(),
+            target_note_id: "note-2".to_string(),
+            anchor_text: None,
+            position: None,
+            created_at: 123,
+        };
+        let request = client.build_delete_note_link_request(&row).unwrap();
+        let url = request.url().as_str();
+
+        assert_eq!(request.method(), reqwest::Method::DELETE);
+        assert!(url.starts_with("https://example.supabase.co/rest/v1/note_links?"));
+        assert!(url.contains("workspace_id=eq."));
+        assert!(url.contains("id=eq.link-1"));
     }
 }
