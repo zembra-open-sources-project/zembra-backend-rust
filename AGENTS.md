@@ -115,4 +115,3 @@
 - `zembra-schema` 是本地 SQLite、Supabase/Postgres 远端备份以及任何后续数据库形态的唯一数据契约来源。
 - 本仓库只能消费 `vendor/zembra-schema` 中已经存在并固定版本的数据契约，禁止在本仓库新增独立 schema 文件或把缺失 schema 作为后端实现内容补齐。
 - 任何开发需求如果需要新增、修改、补齐、推断或发明与数据库有关的 schema，必须立即停止本仓库开发，并要求先到 `zembra-schema` 仓库完成契约变更。
-- Supabase/Postgres schema 不得在本仓库独立演化；它只能作为 `zembra-schema` 统一数据契约的数据库方言实现。
