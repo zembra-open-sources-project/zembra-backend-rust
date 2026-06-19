@@ -63,11 +63,10 @@
 | `zembra-backend-rust` | 编译后的后端服务二进制 |
 | `config/default.toml` | 默认配置 |
 | `.env.example` | 用户配置示例 |
-| `supabase/migrations/` | 远端 Supabase schema migration |
 | `LICENSE` | 许可证 |
 | `SHA256SUMS` | 所有 tar.gz 的 SHA-256 校验 |
 
-产物不包含 `data/`、`logs/`、`.zembra.env`、本地数据库文件或任何密钥。
+产物不包含 schema 文件、`data/`、`logs/`、`.zembra.env`、本地数据库文件或任何密钥。数据库契约由仓库固定的 `vendor/zembra-schema` 版本提供，不复制到 release 包。
 
 ### 发布文档
 

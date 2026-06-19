@@ -25,10 +25,9 @@ cargo clippy --locked -- -D warnings
 | `zembra-backend-rust` | 后端服务二进制 |
 | `config/default.toml` | 默认配置 |
 | `.env.example` | 用户配置示例 |
-| `supabase/migrations/` | Supabase 远端 schema migration |
 | `LICENSE` | 许可证 |
 
-发布包不包含 `data/`、`logs/`、`.zembra.env`、SQLite 数据库文件或任何密钥。
+发布包不包含 schema 文件、`data/`、`logs/`、`.zembra.env`、SQLite 数据库文件或任何密钥。数据库契约由仓库固定的 `vendor/zembra-schema` 版本提供，不随 release 包复制。
 
 ## 下载与校验
 

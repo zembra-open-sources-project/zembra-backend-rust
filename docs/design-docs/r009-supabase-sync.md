@@ -2,6 +2,8 @@
 
 日期：2026-05-04
 
+> r027 更新：Supabase/Postgres 远端 schema 归属已迁回 `zembra-schema v0.5.0`。本仓运行时只接入 `vendor/zembra-schema/migrations/005_register_unified_postgres_contract.sql` 的 SQLite 版本登记迁移，不再维护本仓 `supabase/migrations/001_initial_sync_schema.sql`；以下正文保留 r009 当时的历史设计上下文。
+
 需求澄清文档：`docs/request-clarify/r009-supabase-sync.md`
 
 ## 核心功能（WHAT）

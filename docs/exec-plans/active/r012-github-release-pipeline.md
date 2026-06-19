@@ -57,7 +57,7 @@
 
 **Function:** 生成平台二进制 tar.gz 和 `SHA256SUMS`。
 
-**Implementation Notes:** 发布包包含 `zembra-backend-rust`、`config/default.toml`、`.env.example`、`supabase/migrations/`、`LICENSE`；不包含 `data/`、`logs/`、`.zembra.env` 或本地数据库文件。
+**Implementation Notes:** 发布包包含 `zembra-backend-rust`、`config/default.toml`、`.env.example`、`LICENSE`；不包含 schema 文件、`data/`、`logs/`、`.zembra.env` 或本地数据库文件。数据库契约由仓库固定的 `vendor/zembra-schema` 版本提供，不复制到 release 包。
 
 **Expected Verification Result:** GitHub Release assets 包含 tar.gz 和 `SHA256SUMS`，tar.gz 内容符合发布范围。
 

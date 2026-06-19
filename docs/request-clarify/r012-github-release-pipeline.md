@@ -27,7 +27,7 @@
 | Submodule | checkout 必须启用 `submodules: recursive`，确保 `vendor/zembra-schema` 可用 |
 | Release 触发 | push `v*` tag 后触发 |
 | Release 校验 | tag 版本必须和 `Cargo.toml` 中的 `package.version` 一致 |
-| Release 产物 | 打包服务二进制、`config/default.toml`、`.env.example`、`supabase/migrations/`、`LICENSE` |
+| Release 产物 | 打包服务二进制、`config/default.toml`、`.env.example`、`LICENSE`；不包含 schema 文件 |
 | 校验文件 | 发布 `SHA256SUMS` |
 | 发布说明 | 文档说明如何下载、配置 `.zembra.env`、启动服务和验证 `/health` |
 

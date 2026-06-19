@@ -13,7 +13,7 @@
 
 ### 任务 #1: 接入 SQLite v0.5.0 登记迁移
 
-**Status:** Designed
+**Status:** Finished
 
 **Files:**
 - Modify: `src/repositories/database.rs`
@@ -24,7 +24,7 @@
 
 ### 任务 #2: 补齐旧库迁移元数据兼容
 
-**Status:** Designed
+**Status:** Finished
 
 **Files:**
 - Modify: `src/repositories/database.rs`
@@ -35,7 +35,7 @@
 
 ### 任务 #3: 更新数据库测试
 
-**Status:** Designed
+**Status:** Finished
 
 **Files:**
 - Modify: `src/repositories/database.rs`
@@ -48,7 +48,7 @@
 
 ### 任务 #4: 删除历史 Supabase migration
 
-**Status:** Designed
+**Status:** Finished
 
 **Files:**
 - Delete: `supabase/migrations/001_initial_sync_schema.sql`
@@ -59,7 +59,7 @@
 
 ### 任务 #5: 修订 r009 历史文档开头
 
-**Status:** Designed
+**Status:** Finished
 
 **Files:**
 - Modify: `docs/request-clarify/r009-supabase-sync.md`
@@ -74,7 +74,7 @@
 
 ### 任务 #6: 更新 release 相关文档
 
-**Status:** Designed
+**Status:** Finished
 
 **Files:**
 - Modify: `docs/release.md`
@@ -90,7 +90,7 @@
 
 ### 任务 #7: 运行验证
 
-**Status:** Designed
+**Status:** Testing
 
 **Files:**
 - Verify: `src/repositories/database.rs`
@@ -103,10 +103,11 @@
 - 功能：确认本地 SQLite 已接入 `0.5.0`，且本仓不再把历史 Supabase migration 当作 schema 来源。
 - 实现说明：运行格式、定向数据库测试、编译检查和引用检查；确认 diff 不包含 sync 业务逻辑或 `vendor/zembra-schema` 内容修改。
 - 预期验证结果：`cargo fmt --check`、`cargo test database`、`cargo check` 通过；`rg -n "001_initial_sync_schema|supabase/migrations" docs src tests config supabase` 的命中符合 r027 预期；`rg -n "vendor/zembra-schema/postgres|vendor/zembra-schema/supabase" docs` 能找到新消费路径；`git diff --stat` 只包含 r027 范围内文件。
+- 验证记录：2026-06-19 已通过 `cargo fmt --check`、`test ! -e supabase/migrations/001_initial_sync_schema.sql`、release 文档 `supabase/migrations` 专项检查和 `vendor/zembra-schema/postgres|vendor/zembra-schema/supabase` 引用检查。`cargo test database` 和 `cargo check` 在 cargo 调用 `rustc -vV` 阶段被 SIGKILL，非沙箱权限下重试仍失败；直接运行 `rustc -vV` 和 `cargo metadata --no-deps --format-version 1` 可成功。
 
 ### 任务 #8: 更新执行计划状态并提交
 
-**Status:** Designed
+**Status:** Finished
 
 **Files:**
 - Modify: `docs/exec-plans/active/r027-supabase-schema-ownership-migration.md`
@@ -115,3 +116,4 @@
 - 功能：按实际执行结果更新任务状态，并创建原子提交。
 - 实现说明：每个 Stage 完成后更新任务状态；提交前检查 `git status --porcelain`、`git diff --stat` 和必要 diff。commit message 使用 Conventional Commits。
 - 预期验证结果：工作区只包含 r027 相关改动；提交信息满足 `fix: ...`、`chore: ...` 或 `docs: ...` 格式要求。
+- 执行记录：2026-06-19 提交前检查确认工作区只包含 r027 相关改动；`cargo test database` 和 `cargo check` 的阻断已记录在任务 #7。
