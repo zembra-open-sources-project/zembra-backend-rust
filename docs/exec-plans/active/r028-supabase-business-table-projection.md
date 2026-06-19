@@ -242,7 +242,7 @@
 
 ### Task #12: 执行第一验收：已有数据真实同步到 Supabase
 
-**Status:** Testing
+**Status:** Finished
 
 **文件：**
 - 验证：`.zembra.env`
@@ -252,7 +252,7 @@
 - 功能：把当前本地已经存在的笔记和相关数据真实同步到 Supabase。
 - 实现说明：禁止制造随机数据；禁止只看 `sync_changes`；必须确认 Supabase 中九张表都出现本地已有数据对应记录。若远端存在本地没有的数据，也必须验证被拉回本地。
 - 预期验证结果：Supabase 九张表与本地九张表在主键集合和字段值上达到一致，计划中记录真实 Supabase 验证时间、命令摘要和结果。
-- 验证记录：2026-06-19 真实执行 `./scripts/verify_r028_real_sync.sh`。本地 contract 为 `0.5.0`，远端 contract 为 `missing`，当前配置已提供 `remote_database_password`，后端会自动尝试 remote schema contract migration，不再需要 `migrate_remote_schema` 开关。本机真实验收仍未通过，失败点为后端 direct Postgres 连接未在当前网络环境完成连接，尚未执行到九表同步；该结果不是验收通过，下一步需要让后端获得可用的 Supabase Postgres 管理连接后重新运行本脚本。
+- 验证记录：2026-06-19 真实执行 `./scripts/verify_r028_real_sync.sh`。本地 contract 为 `0.5.0`，远端 contract 为 `0.5.0`；同步前九张同步表完整行数据均一致：`workspaces=1`、`devices=1`、`fields=4`、`tags=11`、`notes=21`、`note_revisions=24`、`note_tags=10`、`note_links=1`、`sync_changes=43`；真实调用 `/sync/run` 返回 `{"pulled":0,"pushed":0}`；同步后再次完整比对九张表全部一致。第一验收通过：本地已有数据已严格真实同步到 Supabase。
 
 ### Task #13: 执行第二验收：新数据真实同步到 Supabase
 

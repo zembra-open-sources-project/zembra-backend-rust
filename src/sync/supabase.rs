@@ -182,9 +182,7 @@ impl SupabaseClient {
                 .fetch_table_rows("note_tags", "workspace_id.asc,note_id.asc,tag_id.asc", true)
                 .await?,
             note_links: self.fetch_table_rows("note_links", "id.asc", true).await?,
-            sync_changes: self
-                .fetch_table_rows("sync_changes", "created_at.asc,id.asc", true)
-                .await?,
+            sync_changes: self.fetch_sync_change_snapshot_rows().await?,
         })
     }
 
@@ -563,7 +561,13 @@ impl SupabaseClient {
                 });
             }
 
-            let mut page = response.json::<Vec<T>>().await?;
+            let body = response.text().await?;
+            let mut page =
+                serde_json::from_str::<Vec<T>>(&body).map_err(|error| SupabaseError::Decode {
+                    table: table.to_string(),
+                    body: truncate_body(&body),
+                    message: error.to_string(),
+                })?;
             let page_len = page.len();
             rows.append(&mut page);
 
@@ -597,6 +601,24 @@ impl SupabaseClient {
         let request = self.build_upsert_table_request(table, rows)?;
         let response = self.client.execute(request).await?;
         ensure_success(response).await
+    }
+
+    /// Fetches Supabase sync changes and converts jsonb payloads to local JSON text.
+    ///
+    /// # Returns
+    ///
+    /// Returns sync change snapshot rows in stable cursor order.
+    async fn fetch_sync_change_snapshot_rows(
+        &self,
+    ) -> Result<Vec<SyncChangeSnapshotRow>, SupabaseError> {
+        let rows = self
+            .fetch_table_rows::<SupabaseSyncChangeRecord>(
+                "sync_changes",
+                "created_at.asc,id.asc",
+                true,
+            )
+            .await?;
+        Ok(rows.into_iter().map(Into::into).collect())
     }
 }
 
@@ -698,6 +720,30 @@ impl From<SupabaseSyncChangeRecord> for SyncChangeRecord {
     }
 }
 
+impl From<SupabaseSyncChangeRecord> for SyncChangeSnapshotRow {
+    /// Converts a Supabase change into a snapshot row with JSON payload text.
+    ///
+    /// # Returns
+    ///
+    /// Returns a sync change snapshot row.
+    fn from(change: SupabaseSyncChangeRecord) -> Self {
+        Self {
+            id: change.id,
+            workspace_id: change.workspace_id,
+            device_id: change.device_id,
+            entity_type: change.entity_type,
+            entity_id: change.entity_id,
+            operation: change.operation,
+            base_revision_id: change.base_revision_id,
+            new_revision_id: change.new_revision_id,
+            payload: change.payload.to_string(),
+            created_at: change.created_at,
+            applied_at: change.applied_at,
+            supabase_committed_at: change.supabase_committed_at,
+        }
+    }
+}
+
 /// Converts local sync changes into Supabase JSON records.
 ///
 /// # Arguments
@@ -773,6 +819,16 @@ pub enum SupabaseError {
         /// Response body returned by Supabase.
         body: String,
     },
+    /// Supabase returned JSON that does not match the expected table row shape.
+    #[error("Supabase decode failed for {table}: {message}; body={body}")]
+    Decode {
+        /// Table being decoded.
+        table: String,
+        /// Response body returned by Supabase.
+        body: String,
+        /// JSON decode error.
+        message: String,
+    },
 }
 
 /// Converts a Supabase response status into a result.
@@ -807,9 +863,27 @@ fn unix_timestamp() -> i64 {
         .unwrap_or(0)
 }
 
+/// Truncates a response body before it is included in an error message.
+///
+/// # Arguments
+///
+/// * `body` - Response body returned by Supabase.
+///
+/// # Returns
+///
+/// Returns a short response body preview.
+fn truncate_body(body: &str) -> String {
+    const LIMIT: usize = 512;
+    let mut preview: String = body.chars().take(LIMIT).collect();
+    if body.chars().count() > LIMIT {
+        preview.push_str("...");
+    }
+    preview
+}
+
 #[cfg(test)]
 mod tests {
-    use super::SupabaseClient;
+    use super::{SupabaseClient, SupabaseSyncChangeRecord};
     use crate::sync::table_snapshot::{FieldSnapshotRow, NoteLinkSnapshotRow, NoteTagSnapshotRow};
 
     #[test]
@@ -959,5 +1033,35 @@ mod tests {
         assert!(url.starts_with("https://example.supabase.co/rest/v1/note_links?"));
         assert!(url.contains("workspace_id=eq."));
         assert!(url.contains("id=eq.link-1"));
+    }
+
+    #[test]
+    fn supabase_sync_change_converts_json_payload_to_snapshot_text() {
+        let row: crate::sync::table_snapshot::SyncChangeSnapshotRow = SupabaseSyncChangeRecord {
+            id: "change-1".to_string(),
+            workspace_id: crate::repositories::taxonomy::DEFAULT_WORKSPACE_ID.to_string(),
+            device_id: "device-1".to_string(),
+            entity_type: "note".to_string(),
+            entity_id: "note-1".to_string(),
+            operation: "insert".to_string(),
+            base_revision_id: None,
+            new_revision_id: None,
+            payload: serde_json::json!({"id": "note-1"}),
+            created_at: 123,
+            applied_at: None,
+            supabase_committed_at: None,
+        }
+        .into();
+
+        assert_eq!(row.payload, "{\"id\":\"note-1\"}");
+    }
+
+    #[test]
+    fn truncate_body_limits_decode_error_preview() {
+        let body = "a".repeat(600);
+        let preview = super::truncate_body(&body);
+
+        assert_eq!(preview.chars().count(), 515);
+        assert!(preview.ends_with("..."));
     }
 }
