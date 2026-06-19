@@ -4,6 +4,7 @@ mod apply;
 mod ids;
 mod outbox;
 mod payload;
+mod snapshot;
 mod state;
 mod types;
 

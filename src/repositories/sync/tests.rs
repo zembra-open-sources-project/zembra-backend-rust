@@ -1,5 +1,6 @@
 use super::{SyncChangeRecord, SyncRepository};
 use crate::repositories::database::Database;
+use crate::repositories::taxonomy::DEFAULT_WORKSPACE_ID;
 
 /// Builds a remote sync change for tests.
 ///
@@ -23,7 +24,7 @@ fn remote_change(
 ) -> SyncChangeRecord {
     SyncChangeRecord {
         id: id.to_string(),
-        workspace_id: crate::repositories::taxonomy::DEFAULT_WORKSPACE_ID.to_string(),
+        workspace_id: DEFAULT_WORKSPACE_ID.to_string(),
         device_id: "remote-device".to_string(),
         entity_type: entity_type.to_string(),
         entity_id: entity_id.to_string(),
@@ -296,4 +297,115 @@ async fn apply_remote_note_link_attach_and_detach() {
 
     assert_eq!(attached, 1);
     assert_eq!(detached, 0);
+}
+
+#[tokio::test]
+async fn read_local_table_snapshot_returns_all_sync_tables_in_stable_order() {
+    let database = Database::connect("sqlite://:memory:").await.unwrap();
+    let repository = SyncRepository::new(database.pool.clone());
+
+    sqlx::query("INSERT INTO devices (id, workspace_id, name, platform, created_at, sync_enabled) VALUES ('local-backend', ?, 'Local Backend', 'backend', 1, 1)")
+        .bind(DEFAULT_WORKSPACE_ID)
+        .execute(&database.pool)
+        .await
+        .unwrap();
+    sqlx::query("INSERT INTO fields (id, workspace_id, name, created_at) VALUES ('field-b', ?, 'field b', 20), ('field-a', ?, 'field a', 10)")
+        .bind(DEFAULT_WORKSPACE_ID)
+        .bind(DEFAULT_WORKSPACE_ID)
+    .execute(&database.pool)
+    .await
+    .unwrap();
+    sqlx::query("INSERT INTO tags (id, workspace_id, name, parent_tag_id, path, depth, created_at) VALUES ('tag-b', ?, 'tag b', NULL, 'tag-b', 0, 20), ('tag-a', ?, 'tag a', NULL, 'tag-a', 0, 10)")
+        .bind(DEFAULT_WORKSPACE_ID)
+        .bind(DEFAULT_WORKSPACE_ID)
+    .execute(&database.pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO notes \
+         (id, workspace_id, content, role, field_id, created_at, updated_at, archived_at, deleted_at, current_revision_id, last_change_id, conflict_status) \
+         VALUES \
+         ('note-b', ?, 'note b', 'Human', 'field-b', 20, 21, 22, NULL, NULL, NULL, 'none'), \
+         ('note-a', ?, 'note a', 'Agent', 'field-a', 10, 11, NULL, 12, NULL, NULL, 'none')",
+    )
+    .bind(DEFAULT_WORKSPACE_ID)
+    .bind(DEFAULT_WORKSPACE_ID)
+    .execute(&database.pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO note_revisions \
+         (id, workspace_id, note_id, content, title, device_id, created_at, base_revision_id, change_id) \
+         VALUES ('revision-a', ?, 'note-a', 'note a', NULL, NULL, 10, NULL, NULL)",
+    )
+    .bind(DEFAULT_WORKSPACE_ID)
+    .execute(&database.pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO note_tags (workspace_id, note_id, tag_id, created_at) VALUES \
+         (?, 'note-b', 'tag-b', 20), \
+         (?, 'note-a', 'tag-a', 10)",
+    )
+    .bind(DEFAULT_WORKSPACE_ID)
+    .bind(DEFAULT_WORKSPACE_ID)
+    .execute(&database.pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO note_links \
+         (id, workspace_id, source_note_id, target_note_id, anchor_text, position, created_at) \
+         VALUES ('link-a', ?, 'note-a', 'note-b', 'note b', 3, 30)",
+    )
+    .bind(DEFAULT_WORKSPACE_ID)
+    .execute(&database.pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO sync_changes \
+         (id, workspace_id, device_id, entity_type, entity_id, operation, payload, created_at, applied_at, supabase_committed_at) \
+         VALUES \
+         ('change-b', ?, 'local-backend', 'note', 'note-b', 'insert', '{}', 20, 20, NULL), \
+         ('change-a', ?, 'local-backend', 'note', 'note-a', 'insert', '{}', 10, 10, NULL)",
+    )
+    .bind(DEFAULT_WORKSPACE_ID)
+    .bind(DEFAULT_WORKSPACE_ID)
+    .execute(&database.pool)
+    .await
+    .unwrap();
+
+    let snapshot = repository.read_local_table_snapshot().await.unwrap();
+
+    assert_eq!(snapshot.workspaces.len(), 1);
+    assert_eq!(snapshot.devices[0].id, "local-backend");
+    assert_eq!(
+        snapshot
+            .fields
+            .iter()
+            .map(|field| field.id.as_str())
+            .collect::<Vec<_>>(),
+        vec!["field-a", "field-b"]
+    );
+    assert_eq!(
+        snapshot
+            .tags
+            .iter()
+            .map(|tag| tag.id.as_str())
+            .collect::<Vec<_>>(),
+        vec!["tag-a", "tag-b"]
+    );
+    assert_eq!(snapshot.notes[0].id, "note-a");
+    assert_eq!(snapshot.notes[0].deleted_at, Some(12));
+    assert_eq!(snapshot.notes[1].archived_at, Some(22));
+    assert_eq!(snapshot.note_revisions[0].id, "revision-a");
+    assert_eq!(snapshot.note_tags[0].note_id, "note-a");
+    assert_eq!(snapshot.note_links[0].id, "link-a");
+    assert_eq!(
+        snapshot
+            .sync_changes
+            .iter()
+            .map(|change| change.id.as_str())
+            .collect::<Vec<_>>(),
+        vec!["change-a", "change-b"]
+    );
 }

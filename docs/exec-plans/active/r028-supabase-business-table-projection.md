@@ -38,7 +38,7 @@
 
 ### Task #2: 建立真实验收清单
 
-**Status:** Designed
+**Status:** Finished
 
 **文件：**
 - 修改：`docs/design-docs/r028-supabase-business-table-projection.md`
@@ -70,10 +70,11 @@
 - 功能：建立九张表的 Rust 数据结构、表名枚举、主键或复合主键规则和字段比较规则。
 - 实现说明：结构体字段必须对应 `vendor/zembra-schema` 已有契约；`note_tags` 使用 `workspace_id + note_id + tag_id` 作为关系键；其他表按 schema 主键或现有代码事实确认；字段比较必须覆盖软删除、归档、revision、关系表字段和 `sync_changes` 字段。所有结构体成员变量按项目规范写注释。
 - 预期验证结果：`cargo check` 能通过；模型中只出现需求指定九张同步表；没有新增 schema 文件或 migration。
+- 完成时间：2026-06-19，已通过 `cargo fmt --check`、`cargo test repositories::sync::tests::read_local_table_snapshot_returns_all_sync_tables_in_stable_order`、`cargo check`。
 
 ### Task #4: 实现本地 SQLite 快照读取
 
-**Status:** Designed
+**Status:** Finished
 
 **文件：**
 - 创建：`src/repositories/sync/snapshot.rs`
@@ -84,6 +85,7 @@
 - 功能：一次读取本地九张同步表的当前数据，供差异比较使用。
 - 实现说明：在 `SyncRepository` 中新增读取本地快照的方法，SQL 查询必须显式列字段并按稳定顺序排序；读取 `notes` 时包含 `deleted_at`、`archived_at` 和 `current_revision_id`；读取关系表时包含完整复合键；读取 `sync_changes` 时按 `created_at ASC, id ASC` 排序。该任务只读本地数据，不写本地和远端。
 - 预期验证结果：新增仓储测试能在已有测试数据库中插入或复用 fixtures 后读取九张表；断言本地快照包含 notes、关系表和 `sync_changes`，且排序稳定。
+- 完成时间：2026-06-19，已通过 `cargo fmt --check`、`cargo test repositories::sync::tests::read_local_table_snapshot_returns_all_sync_tables_in_stable_order`、`cargo check`。
 
 ## Stage #3: Supabase 九张表读写能力
 
