@@ -216,7 +216,7 @@ impl SyncService {
             return Ok(());
         }
 
-        if settings.migrate_remote_schema {
+        if !settings.remote_database_password.trim().is_empty() {
             apply_remote_schema_contract(
                 &settings.supabase_url,
                 &settings.remote_database_password,

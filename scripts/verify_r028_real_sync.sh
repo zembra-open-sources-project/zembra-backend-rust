@@ -73,11 +73,6 @@ def load_config():
         sync_enabled = bool(config.get("sync", {}).get("enabled", False))
     else:
         sync_enabled = sync_enabled.strip().lower() in {"1", "true", "yes", "on"}
-    migrate_remote_schema = os.environ.get("ZEMBRA_SYNC_MIGRATE_REMOTE_SCHEMA")
-    if migrate_remote_schema is None:
-        migrate_remote_schema = bool(config.get("sync", {}).get("migrate_remote_schema", False))
-    else:
-        migrate_remote_schema = migrate_remote_schema.strip().lower() in {"1", "true", "yes", "on"}
     remote_database_password = os.environ.get("ZEMBRA_SYNC_REMOTE_DATABASE_PASSWORD") or str(
         config.get("sync", {}).get("remote_database_password", "")
     )
@@ -89,7 +84,6 @@ def load_config():
         supabase_url.rstrip("/"),
         secret_key,
         sync_enabled,
-        migrate_remote_schema,
         remote_database_password,
     )
 
@@ -99,7 +93,7 @@ def toml_string(value):
     return json.dumps(str(value))
 
 
-def write_runtime_config(home, database_path, supabase_url, secret_key, sync_enabled, migrate_remote_schema, remote_database_password):
+def write_runtime_config(home, database_path, supabase_url, secret_key, sync_enabled, remote_database_password):
     """Write a temporary backend config without modifying the user's real config file."""
     config_path = Path(home) / ".zembra.env"
     config_path.write_text(
@@ -122,7 +116,6 @@ def write_runtime_config(home, database_path, supabase_url, secret_key, sync_ena
                 "interval_seconds = 60",
                 f"supabase_url = {toml_string(supabase_url)}",
                 f"secret_key = {toml_string(secret_key)}",
-                f"migrate_remote_schema = {str(migrate_remote_schema).lower()}",
                 f"remote_database_password = {toml_string(remote_database_password)}",
                 "",
             ]
@@ -275,7 +268,6 @@ def main():
         supabase_url,
         secret_key,
         sync_enabled,
-        migrate_remote_schema,
         remote_database_password,
     ) = load_config()
     if not database_path.exists():
@@ -293,7 +285,7 @@ def main():
     print(f"supabase={supabase_url}")
     print(f"local_schema_contract={local_version}")
     print(f"remote_schema_contract={remote_version}")
-    print(f"migration_enabled={str(migrate_remote_schema).lower()}")
+    print(f"migration_password_configured={str(bool(remote_database_password.strip())).lower()}")
     print()
 
     if local_version == remote_version:
@@ -310,7 +302,6 @@ def main():
         supabase_url,
         secret_key,
         sync_enabled,
-        migrate_remote_schema,
         remote_database_password,
     )
     server_env = {**os.environ, "HOME": runtime_home.name}

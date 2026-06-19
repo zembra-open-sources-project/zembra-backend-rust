@@ -44,7 +44,7 @@ pub fn remote_database_url(
     let project_ref = supabase_project_ref(supabase_url)?;
     let password = utf8_percent_encode(database_password.trim(), NON_ALPHANUMERIC).to_string();
     Ok(format!(
-        "postgresql://postgres:{password}@db.{project_ref}.supabase.co:5432/postgres"
+        "postgresql://postgres:{password}@db.{project_ref}.supabase.co:5432/postgres?sslmode=require"
     ))
 }
 
@@ -136,7 +136,7 @@ mod tests {
 
         assert_eq!(
             url,
-            "postgresql://postgres:pass%20word%2F%40@db.xdeukuklunlzycltmkgg.supabase.co:5432/postgres"
+            "postgresql://postgres:pass%20word%2F%40@db.xdeukuklunlzycltmkgg.supabase.co:5432/postgres?sslmode=require"
         );
     }
 
