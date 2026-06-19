@@ -87,6 +87,12 @@ pub struct SyncSettings {
     /// Supabase secret key used only by the local backend.
     #[serde(default)]
     pub secret_key: String,
+    /// Whether the backend may apply remote schema contract migrations.
+    #[serde(default)]
+    pub migrate_remote_schema: bool,
+    /// Administrator Postgres connection URL used only for remote schema migrations.
+    #[serde(default)]
+    pub remote_database_url: String,
 }
 
 impl Default for LoggingSettings {
@@ -115,6 +121,8 @@ impl Default for SyncSettings {
             interval_seconds: default_sync_interval_seconds(),
             supabase_url: String::new(),
             secret_key: String::new(),
+            migrate_remote_schema: false,
+            remote_database_url: String::new(),
         }
     }
 }
@@ -341,6 +349,13 @@ impl SyncSettings {
                     "sync.secret_key must use a Supabase sb_secret_ key".to_string(),
                 ));
             }
+
+            if self.migrate_remote_schema && self.remote_database_url.trim().is_empty() {
+                return Err(config::ConfigError::Message(
+                    "sync.remote_database_url is required when sync.migrate_remote_schema is true"
+                        .to_string(),
+                ));
+            }
         }
 
         Ok(())
@@ -514,6 +529,8 @@ mod tests {
             interval_seconds: 60,
             supabase_url: "   ".to_string(),
             secret_key: "sb_secret_test-key".to_string(),
+            migrate_remote_schema: false,
+            remote_database_url: String::new(),
         };
 
         assert!(settings.validate().is_err());
@@ -526,6 +543,8 @@ mod tests {
             interval_seconds: 60,
             supabase_url: "https://example.supabase.co".to_string(),
             secret_key: "   ".to_string(),
+            migrate_remote_schema: false,
+            remote_database_url: String::new(),
         };
 
         assert!(settings.validate().is_err());
@@ -538,6 +557,8 @@ mod tests {
             interval_seconds: 60,
             supabase_url: "https://example.supabase.co".to_string(),
             secret_key: "eyJlegacy.jwt.service-role".to_string(),
+            migrate_remote_schema: false,
+            remote_database_url: String::new(),
         };
 
         assert!(settings.validate().is_err());
@@ -550,6 +571,8 @@ mod tests {
             interval_seconds: 4,
             supabase_url: String::new(),
             secret_key: String::new(),
+            migrate_remote_schema: false,
+            remote_database_url: String::new(),
         };
 
         assert!(settings.validate().is_err());

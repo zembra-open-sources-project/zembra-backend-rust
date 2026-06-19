@@ -2,6 +2,7 @@ use crate::config::SyncSettings;
 use crate::repositories::sync::{SyncRepository, SyncStateRecord};
 use crate::sync::diff::{SyncDiffConflict, diff_snapshots};
 use crate::sync::schema_contract::{SchemaContractVersions, TARGET_SCHEMA_CONTRACT_VERSION};
+use crate::sync::schema_migration::{SchemaMigrationError, apply_remote_schema_contract};
 use crate::sync::supabase::{SupabaseClient, SupabaseError};
 use std::sync::{Arc, RwLock};
 
@@ -80,7 +81,8 @@ impl SyncService {
         let settings = self.settings();
         self.ensure_enabled(&settings)?;
         let supabase = SupabaseClient::from_settings(&settings);
-        self.ensure_schema_contract_ready(&supabase).await?;
+        self.ensure_schema_contract_ready(&settings, &supabase)
+            .await?;
         let (local, remote) = self.read_snapshots(&supabase).await?;
         let diff = diff_snapshots(&local, &remote);
         self.ensure_no_conflicts(&diff.conflicts)?;
@@ -101,7 +103,8 @@ impl SyncService {
         let settings = self.settings();
         self.ensure_enabled(&settings)?;
         let supabase = SupabaseClient::from_settings(&settings);
-        self.ensure_schema_contract_ready(&supabase).await?;
+        self.ensure_schema_contract_ready(&settings, &supabase)
+            .await?;
         let (local, remote) = self.read_snapshots(&supabase).await?;
         let diff = diff_snapshots(&local, &remote);
         self.ensure_no_conflicts(&diff.conflicts)?;
@@ -149,7 +152,8 @@ impl SyncService {
         let settings = self.settings();
         self.ensure_enabled(&settings)?;
         let supabase = SupabaseClient::from_settings(&settings);
-        self.ensure_schema_contract_ready(&supabase).await?;
+        self.ensure_schema_contract_ready(&settings, &supabase)
+            .await?;
         let (local, remote) = self.read_snapshots(&supabase).await?;
         let diff = diff_snapshots(&local, &remote);
         self.ensure_no_conflicts(&diff.conflicts)?;
@@ -203,8 +207,43 @@ impl SyncService {
     /// Returns `Ok(())` when both sides are at the target contract version.
     async fn ensure_schema_contract_ready(
         &self,
+        settings: &SyncSettings,
         supabase: &SupabaseClient,
     ) -> Result<(), SyncError> {
+        let versions = self.read_schema_contract_versions(supabase).await?;
+
+        if versions.is_ready() {
+            return Ok(());
+        }
+
+        if settings.migrate_remote_schema {
+            apply_remote_schema_contract(&settings.remote_database_url).await?;
+            let versions = self.read_schema_contract_versions(supabase).await?;
+            if versions.is_ready() {
+                return Ok(());
+            }
+        }
+
+        Err(SyncError::SchemaContractMismatch {
+            local: versions.local,
+            remote: versions.remote,
+            expected: TARGET_SCHEMA_CONTRACT_VERSION.to_string(),
+        })
+    }
+
+    /// Reads local and remote schema contract versions.
+    ///
+    /// # Arguments
+    ///
+    /// * `supabase` - Supabase REST client.
+    ///
+    /// # Returns
+    ///
+    /// Returns both schema contract versions, using `missing` for absent version rows.
+    async fn read_schema_contract_versions(
+        &self,
+        supabase: &SupabaseClient,
+    ) -> Result<SchemaContractVersions, SyncError> {
         let local = self
             .repository
             .local_schema_contract_version()
@@ -214,17 +253,7 @@ impl SyncService {
             .fetch_schema_contract_version()
             .await?
             .unwrap_or_else(|| "missing".to_string());
-        let versions = SchemaContractVersions { local, remote };
-
-        if versions.is_ready() {
-            Ok(())
-        } else {
-            Err(SyncError::SchemaContractMismatch {
-                local: versions.local,
-                remote: versions.remote,
-                expected: TARGET_SCHEMA_CONTRACT_VERSION.to_string(),
-            })
-        }
+        Ok(SchemaContractVersions { local, remote })
     }
 
     /// Writes a partial snapshot to Supabase and records push failures locally.
@@ -386,6 +415,9 @@ pub enum SyncError {
     /// Supabase request failed.
     #[error("{0}")]
     Supabase(#[from] SupabaseError),
+    /// Remote schema contract migration failed.
+    #[error("{0}")]
+    SchemaMigration(#[from] SchemaMigrationError),
     /// Snapshot comparison found unresolved conflicts.
     #[error("synchronization conflict count {count}: {first}")]
     Conflict {

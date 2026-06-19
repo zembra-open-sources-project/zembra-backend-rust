@@ -78,10 +78,11 @@
 - 功能：当远端 contract version 落后时，由后端执行 `vendor/zembra-schema/postgres/` 既有迁移，把远端整体迁到目标版本。
 - 实现说明：迁移来源只能读取 `vendor/zembra-schema/postgres/`，禁止在后端代码中内嵌、复制或拼接业务 DDL；迁移按 contract version 执行整体路径，不按缺失表或缺失字段做局部修补。迁移必须是显式管理员能力，普通数据同步发现版本不一致时停止并返回明确错误，具备迁移配置和执行许可时才运行 migration。
 - 预期验证结果：单元测试覆盖 migration 文件选择、版本顺序和禁止局部补表；配置缺少管理员连接时，普通同步返回 schema contract mismatch，不继续读取九张表。
+- 完成时间：2026-06-19，已实现显式远端 contract migration 开关和管理员 Postgres 连接配置，迁移 SQL 只来自 `vendor/zembra-schema/postgres/001_initial_schema.sql`，同步入口在 schema mismatch 且允许迁移时先执行 contract migration 并重新读取远端 contract version；已通过 `cargo fmt --check`、`cargo test config`、`cargo test sync::schema_migration`、`cargo test sync_routes`、`cargo check`、`bash -n scripts/verify_r028_real_sync.sh`。
 
 ### Task #18: 将 schema contract gate 接入同步入口
 
-**Status:** Designed
+**Status:** Finished
 
 **文件：**
 - 修改：`src/services/sync.rs`

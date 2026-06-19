@@ -77,6 +77,8 @@ impl SyncConfigService {
             interval_seconds: request.interval_seconds,
             supabase_url: request.supabase_url,
             secret_key: request.secret_key.unwrap_or(previous.secret_key),
+            migrate_remote_schema: previous.migrate_remote_schema,
+            remote_database_url: previous.remote_database_url,
         };
         validate_sync_settings(&settings)?;
 
@@ -112,6 +114,8 @@ impl SyncConfigService {
             interval_seconds: current.interval_seconds,
             supabase_url: request.supabase_url.unwrap_or(current.supabase_url),
             secret_key: request.secret_key.unwrap_or(current.secret_key),
+            migrate_remote_schema: current.migrate_remote_schema,
+            remote_database_url: current.remote_database_url,
         };
         validate_sync_settings(&settings)?;
 

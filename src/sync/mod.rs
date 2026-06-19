@@ -2,6 +2,7 @@
 
 pub mod diff;
 pub mod schema_contract;
+pub mod schema_migration;
 pub mod supabase;
 pub mod table_snapshot;
 pub mod worker;
