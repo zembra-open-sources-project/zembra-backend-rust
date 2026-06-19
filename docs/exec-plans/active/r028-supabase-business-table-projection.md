@@ -91,7 +91,7 @@
 
 ### Task #5: 扩展 Supabase REST client 的通用表读取
 
-**Status:** Designed
+**Status:** Finished
 
 **文件：**
 - 修改：`src/sync/supabase.rs`
@@ -129,10 +129,11 @@
 - 功能：比较本地快照和远端快照，产出需要写本地、写远端、删除关系或冲突停止的差异列表。
 - 实现说明：本地有远端没有时写远端；远端有本地没有时写本地；两端字段相同时不处理；两端字段不同时查找对应实体最新 `sync_changes.created_at`，较新的状态覆盖较旧状态；无法判断时间顺序时产出冲突错误。差异计算必须是纯函数，便于自动化覆盖边界。
 - 预期验证结果：单元测试覆盖九张表至少一种本地缺失、远端缺失、字段不同、字段相同场景；覆盖 `sync_changes.created_at` 较新方向判断；覆盖无法判断时返回错误。
+- 完成时间：2026-06-19，已通过 `cargo fmt --check`、`cargo test sync::diff`、`cargo check`。
 
 ### Task #8: 定义写入批次和外键安全顺序
 
-**Status:** Designed
+**Status:** Finished
 
 **文件：**
 - 修改：`src/sync/diff.rs`
@@ -141,6 +142,7 @@
 - 功能：把差异结果整理成安全写入顺序，避免关系表先于主表导致远端外键失败。
 - 实现说明：写入远端和写入本地都使用固定顺序：`workspaces`、`devices`、`fields`、`tags`、`notes`、`note_revisions`、`note_tags`、`note_links`、`sync_changes`；关系删除在对应关系 upsert 前处理；不能用随机顺序或 HashMap 迭代顺序驱动真实写入。
 - 预期验证结果：单元测试断言包含 note 和 note_tag 差异时，note 写入一定排在 note_tag 前；包含 note_link 差异时，相关 notes 写入一定排在 note_links 前。
+- 完成时间：2026-06-19，已通过 `cargo fmt --check`、`cargo test sync::diff`、`cargo check`。
 
 ## Stage #5: 本地写入与 sync service 编排
 
