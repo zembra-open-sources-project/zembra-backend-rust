@@ -4,6 +4,8 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::repositories::sync::SyncChangeRecord;
 
+mod projection;
+
 /// Supabase REST client for synchronization tables.
 #[derive(Debug, Clone)]
 pub struct SupabaseClient {
@@ -67,6 +69,27 @@ impl SupabaseClient {
         let request = self.build_upsert_sync_changes_request(changes)?;
         let response = self.client.execute(request).await?;
         ensure_success(response).await
+    }
+
+    /// Projects local sync changes into Supabase business tables.
+    ///
+    /// # Arguments
+    ///
+    /// * `changes` - Local changes to project before sync log push.
+    ///
+    /// # Returns
+    ///
+    /// Returns `Ok(())` when every business table request succeeds.
+    pub async fn project_business_tables(
+        &self,
+        changes: &[SyncChangeRecord],
+    ) -> Result<(), SupabaseError> {
+        for request in self.build_business_projection_requests(changes)? {
+            let response = self.client.execute(request).await?;
+            ensure_success(response).await?;
+        }
+
+        Ok(())
     }
 
     /// Ensures the default workspace and backend device exist in Supabase.
@@ -403,6 +426,9 @@ pub enum SupabaseError {
         /// Response body returned by Supabase.
         body: String,
     },
+    /// Sync change payload could not be projected to a business table.
+    #[error("Supabase projection payload failed: {0}")]
+    Payload(String),
 }
 
 /// Converts a Supabase response status into a result.

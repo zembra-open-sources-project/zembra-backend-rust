@@ -83,11 +83,22 @@ impl SyncService {
             .list_pending_push_changes(SYNC_BATCH_LIMIT)
             .await?;
 
-        if !changes.is_empty() {
-            supabase.ensure_default_sync_identity().await?;
-        }
+        let push_result = if changes.is_empty() {
+            Ok(())
+        } else {
+            match supabase.build_business_projection_requests(&changes) {
+                Ok(_) => match supabase.ensure_default_sync_identity().await {
+                    Ok(()) => match supabase.project_business_tables(&changes).await {
+                        Ok(()) => supabase.upsert_sync_changes(&changes).await,
+                        Err(error) => Err(error),
+                    },
+                    Err(error) => Err(error),
+                },
+                Err(error) => Err(error),
+            }
+        };
 
-        match supabase.upsert_sync_changes(&changes).await {
+        match push_result {
             Ok(()) => {
                 self.repository.mark_push_success(&changes).await?;
                 Ok(SyncDirectionSummary {
@@ -163,6 +174,70 @@ impl SyncService {
         } else {
             Err(SyncError::Disabled)
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::SyncService;
+    use crate::config::SyncSettings;
+    use crate::repositories::database::Database;
+    use crate::repositories::sync::{SyncChangeInput, record_sync_change_in_transaction};
+
+    #[tokio::test]
+    async fn push_projection_payload_error_does_not_advance_cursor() {
+        let database = Database::connect("sqlite://:memory:").await.unwrap();
+        let mut transaction = database.pool.begin().await.unwrap();
+        record_sync_change_in_transaction(
+            &mut transaction,
+            SyncChangeInput {
+                entity_type: "field",
+                entity_id: "field-1".to_string(),
+                operation: "insert",
+                base_revision_id: None,
+                new_revision_id: None,
+                payload: serde_json::json!({
+                    "id": "field-1",
+                    "created_at": 100
+                }),
+            },
+        )
+        .await
+        .unwrap();
+        transaction.commit().await.unwrap();
+
+        let service = SyncService::new(
+            database.pool.clone(),
+            &SyncSettings {
+                enabled: true,
+                interval_seconds: 60,
+                supabase_url: "https://example.supabase.co".to_string(),
+                secret_key: "sb_secret_test-key".to_string(),
+            },
+        );
+        let error = service.push().await.unwrap_err();
+        let committed_at =
+            sqlx::query_scalar::<_, Option<i64>>("SELECT supabase_committed_at FROM sync_changes")
+                .fetch_one(&database.pool)
+                .await
+                .unwrap();
+        let push_state = service
+            .repository
+            .get_or_create_state("push")
+            .await
+            .unwrap();
+
+        assert!(error.to_string().contains("missing text field name"));
+        assert_eq!(committed_at, None);
+        assert_eq!(push_state.last_change_created_at, 0);
+        assert_eq!(push_state.last_change_id, "0");
+        assert!(
+            push_state
+                .last_error_message
+                .as_deref()
+                .unwrap_or_default()
+                .contains("missing text field name")
+        );
     }
 }
 
