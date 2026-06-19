@@ -83,6 +83,10 @@ impl SyncService {
             .list_pending_push_changes(SYNC_BATCH_LIMIT)
             .await?;
 
+        if !changes.is_empty() {
+            supabase.ensure_default_sync_identity().await?;
+        }
+
         match supabase.upsert_sync_changes(&changes).await {
             Ok(()) => {
                 self.repository.mark_push_success(&changes).await?;

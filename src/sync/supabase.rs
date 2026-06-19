@@ -1,5 +1,6 @@
 use reqwest::header::{AUTHORIZATION, HeaderMap, HeaderValue};
 use serde::{Deserialize, Serialize};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::repositories::sync::SyncChangeRecord;
 
@@ -68,6 +69,23 @@ impl SupabaseClient {
         ensure_success(response).await
     }
 
+    /// Ensures the default workspace and backend device exist in Supabase.
+    ///
+    /// # Returns
+    ///
+    /// Returns `Ok(())` when Supabase accepts both identity upserts.
+    pub async fn ensure_default_sync_identity(&self) -> Result<(), SupabaseError> {
+        let timestamp = unix_timestamp();
+
+        let workspace_request = self.build_upsert_default_workspace_request(timestamp)?;
+        let workspace_response = self.client.execute(workspace_request).await?;
+        ensure_success(workspace_response).await?;
+
+        let device_request = self.build_upsert_default_device_request(timestamp)?;
+        let device_response = self.client.execute(device_request).await?;
+        ensure_success(device_response).await
+    }
+
     /// Fetches remote sync changes after the provided cursor.
     ///
     /// # Arguments
@@ -133,6 +151,66 @@ impl SupabaseClient {
             .headers(self.headers()?)
             .header("Prefer", "resolution=merge-duplicates")
             .json(&supabase_changes(changes))
+            .build()
+            .map_err(Into::into)
+    }
+
+    /// Builds an upsert request for the default workspace.
+    ///
+    /// # Arguments
+    ///
+    /// * `timestamp` - Unix timestamp used for required schema fields.
+    ///
+    /// # Returns
+    ///
+    /// Returns a request ready to execute.
+    pub fn build_upsert_default_workspace_request(
+        &self,
+        timestamp: i64,
+    ) -> Result<reqwest::Request, SupabaseError> {
+        self.client
+            .post(format!("{}/rest/v1/workspaces", self.base_url))
+            .headers(self.headers()?)
+            .header("Prefer", "resolution=merge-duplicates")
+            .json(&[SupabaseWorkspaceRecord {
+                id: crate::repositories::taxonomy::DEFAULT_WORKSPACE_ID.to_string(),
+                workspace_name: None,
+                created_at: timestamp,
+                updated_at: timestamp,
+                archived_at: None,
+                deleted_at: None,
+            }])
+            .build()
+            .map_err(Into::into)
+    }
+
+    /// Builds an upsert request for the backend default device.
+    ///
+    /// # Arguments
+    ///
+    /// * `timestamp` - Unix timestamp used for required schema fields.
+    ///
+    /// # Returns
+    ///
+    /// Returns a request ready to execute.
+    pub fn build_upsert_default_device_request(
+        &self,
+        timestamp: i64,
+    ) -> Result<reqwest::Request, SupabaseError> {
+        self.client
+            .post(format!("{}/rest/v1/devices", self.base_url))
+            .headers(self.headers()?)
+            .header("Prefer", "resolution=merge-duplicates")
+            .json(&[SupabaseDeviceRecord {
+                id: crate::repositories::sync::DEFAULT_DEVICE_ID.to_string(),
+                workspace_id: crate::repositories::taxonomy::DEFAULT_WORKSPACE_ID.to_string(),
+                name: "Local Backend".to_string(),
+                platform: "backend".to_string(),
+                created_at: timestamp,
+                last_seen_at: None,
+                sync_enabled: true,
+                last_synced_at: None,
+            }])
             .build()
             .map_err(Into::into)
     }
@@ -215,6 +293,44 @@ struct SupabaseSyncChangeRecord {
     applied_at: Option<i64>,
     /// Unix timestamp for Supabase commit.
     supabase_committed_at: Option<i64>,
+}
+
+/// Workspace row used to register the default sync workspace in Supabase.
+#[derive(Debug, Clone, Serialize)]
+struct SupabaseWorkspaceRecord {
+    /// Workspace identifier.
+    id: String,
+    /// Optional display name.
+    workspace_name: Option<String>,
+    /// Unix timestamp for creation.
+    created_at: i64,
+    /// Unix timestamp for last update.
+    updated_at: i64,
+    /// Optional archive timestamp.
+    archived_at: Option<i64>,
+    /// Optional deletion timestamp.
+    deleted_at: Option<i64>,
+}
+
+/// Device row used to register the backend sync device in Supabase.
+#[derive(Debug, Clone, Serialize)]
+struct SupabaseDeviceRecord {
+    /// Device identifier.
+    id: String,
+    /// Workspace identifier.
+    workspace_id: String,
+    /// Human-readable device name.
+    name: String,
+    /// Device platform.
+    platform: String,
+    /// Unix timestamp for creation.
+    created_at: i64,
+    /// Optional last seen timestamp.
+    last_seen_at: Option<i64>,
+    /// Whether the device participates in sync.
+    sync_enabled: bool,
+    /// Optional last synced timestamp.
+    last_synced_at: Option<i64>,
 }
 
 impl From<SupabaseSyncChangeRecord> for SyncChangeRecord {
@@ -309,6 +425,18 @@ async fn ensure_success(response: reqwest::Response) -> Result<(), SupabaseError
     })
 }
 
+/// Returns the current Unix timestamp in seconds.
+///
+/// # Returns
+///
+/// Returns a non-negative Unix timestamp.
+fn unix_timestamp() -> i64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_secs() as i64)
+        .unwrap_or(0)
+}
+
 #[cfg(test)]
 mod tests {
     use super::SupabaseClient;
@@ -342,5 +470,29 @@ mod tests {
         assert!(url.contains("workspace_id=eq."));
         assert!(url.contains("device_id=neq.local-backend"));
         assert!(url.contains("limit=25"));
+    }
+
+    #[test]
+    fn workspace_upsert_request_targets_workspaces() {
+        let client = SupabaseClient::new("https://example.supabase.co", "sb_secret_test-key");
+        let request = client.build_upsert_default_workspace_request(123).unwrap();
+
+        assert_eq!(
+            request.url().as_str(),
+            "https://example.supabase.co/rest/v1/workspaces"
+        );
+        assert_eq!(request.headers()["prefer"], "resolution=merge-duplicates");
+    }
+
+    #[test]
+    fn device_upsert_request_targets_devices() {
+        let client = SupabaseClient::new("https://example.supabase.co", "sb_secret_test-key");
+        let request = client.build_upsert_default_device_request(123).unwrap();
+
+        assert_eq!(
+            request.url().as_str(),
+            "https://example.supabase.co/rest/v1/devices"
+        );
+        assert_eq!(request.headers()["prefer"], "resolution=merge-duplicates");
     }
 }
