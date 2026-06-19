@@ -107,3 +107,12 @@
 
 1. 配置文件管理：除非用户额外强调，否则统一使用 `.zembra.env`（也就是当前代码仓的管理方式）
 2. 笔记可见性默认口径：所有 notes 相关接口，除非用户明确要求包含归档或删除内容，否则必须只处理未删除、未归档笔记，即查询条件必须过滤 `deleted_at IS NULL` 和 `archived_at IS NULL`；该规则是严格纪律，不得作为需求澄清点反复询问。
+
+## 数据库 Schema 绝对边界
+
+- 本仓库严格禁止发明、维护、复制或演化任何数据库 schema。
+- 所有数据库 schema、migration、DDL、表结构、字段定义、索引、约束、枚举、触发器、函数和跨数据库方言实现，必须且只允许在 `zembra-schema` 仓库处理。
+- `zembra-schema` 是本地 SQLite、Supabase/Postgres 远端备份以及任何后续数据库形态的唯一数据契约来源。
+- 本仓库只能消费 `vendor/zembra-schema` 中已经存在并固定版本的数据契约，禁止在本仓库新增独立 schema 文件或把缺失 schema 作为后端实现内容补齐。
+- 任何开发需求如果需要新增、修改、补齐、推断或发明与数据库有关的 schema，必须立即停止本仓库开发，并要求先到 `zembra-schema` 仓库完成契约变更。
+- Supabase/Postgres schema 不得在本仓库独立演化；它只能作为 `zembra-schema` 统一数据契约的数据库方言实现。
