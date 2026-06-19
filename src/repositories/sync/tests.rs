@@ -1,6 +1,10 @@
 use super::{SyncChangeRecord, SyncRepository};
 use crate::repositories::database::Database;
 use crate::repositories::taxonomy::DEFAULT_WORKSPACE_ID;
+use crate::sync::table_snapshot::{
+    DeviceSnapshotRow, FieldSnapshotRow, NoteRevisionSnapshotRow, NoteSnapshotRow,
+    SyncChangeSnapshotRow, SyncTableSnapshot, WorkspaceSnapshotRow,
+};
 
 /// Builds a remote sync change for tests.
 ///
@@ -407,5 +411,98 @@ async fn read_local_table_snapshot_returns_all_sync_tables_in_stable_order() {
             .map(|change| change.id.as_str())
             .collect::<Vec<_>>(),
         vec!["change-a", "change-b"]
+    );
+}
+
+#[tokio::test]
+async fn write_local_table_snapshot_upserts_remote_rows() {
+    let database = Database::connect("sqlite://:memory:").await.unwrap();
+    let repository = SyncRepository::new(database.pool.clone());
+    let snapshot = SyncTableSnapshot {
+        workspaces: vec![WorkspaceSnapshotRow {
+            id: DEFAULT_WORKSPACE_ID.to_string(),
+            workspace_name: Some("Remote Workspace".to_string()),
+            created_at: 1,
+            updated_at: 2,
+            archived_at: None,
+            deleted_at: None,
+        }],
+        devices: vec![DeviceSnapshotRow {
+            id: "remote-device".to_string(),
+            workspace_id: DEFAULT_WORKSPACE_ID.to_string(),
+            name: "Remote Device".to_string(),
+            platform: "remote".to_string(),
+            created_at: 1,
+            last_seen_at: Some(2),
+            sync_enabled: true,
+            last_synced_at: Some(3),
+        }],
+        fields: vec![FieldSnapshotRow {
+            id: "field-remote".to_string(),
+            workspace_id: DEFAULT_WORKSPACE_ID.to_string(),
+            name: "Remote Field".to_string(),
+            created_at: 3,
+        }],
+        notes: vec![NoteSnapshotRow {
+            id: "note-remote".to_string(),
+            workspace_id: DEFAULT_WORKSPACE_ID.to_string(),
+            content: "remote note".to_string(),
+            role: "Human".to_string(),
+            field_id: Some("field-remote".to_string()),
+            created_at: 4,
+            updated_at: 5,
+            archived_at: None,
+            deleted_at: None,
+            current_revision_id: Some("revision-remote".to_string()),
+            last_change_id: Some("change-remote".to_string()),
+            conflict_status: "none".to_string(),
+        }],
+        note_revisions: vec![NoteRevisionSnapshotRow {
+            id: "revision-remote".to_string(),
+            workspace_id: DEFAULT_WORKSPACE_ID.to_string(),
+            note_id: "note-remote".to_string(),
+            content: "remote note".to_string(),
+            title: None,
+            device_id: Some("remote-device".to_string()),
+            created_at: 5,
+            base_revision_id: None,
+            change_id: Some("change-remote".to_string()),
+        }],
+        sync_changes: vec![SyncChangeSnapshotRow {
+            id: "change-remote".to_string(),
+            workspace_id: DEFAULT_WORKSPACE_ID.to_string(),
+            device_id: "remote-device".to_string(),
+            entity_type: "note".to_string(),
+            entity_id: "note-remote".to_string(),
+            operation: "insert".to_string(),
+            base_revision_id: None,
+            new_revision_id: Some("revision-remote".to_string()),
+            payload: "{}".to_string(),
+            created_at: 6,
+            applied_at: Some(6),
+            supabase_committed_at: Some(7),
+        }],
+        ..SyncTableSnapshot::default()
+    };
+
+    repository
+        .write_local_table_snapshot(&snapshot)
+        .await
+        .unwrap();
+    let written = repository.read_local_table_snapshot().await.unwrap();
+
+    assert!(written.fields.iter().any(|row| row.id == "field-remote"));
+    assert!(written.notes.iter().any(|row| row.id == "note-remote"));
+    assert!(
+        written
+            .note_revisions
+            .iter()
+            .any(|row| row.id == "revision-remote")
+    );
+    assert!(
+        written
+            .sync_changes
+            .iter()
+            .any(|row| row.id == "change-remote")
     );
 }

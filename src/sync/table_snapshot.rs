@@ -1,5 +1,7 @@
 use serde::{Deserialize, Serialize};
 
+use crate::sync::diff::{SyncTableDiff, SyncTableName};
+
 /// Complete local or remote data snapshot for the synchronized tables.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SyncTableSnapshot {
@@ -21,6 +23,116 @@ pub struct SyncTableSnapshot {
     pub note_links: Vec<NoteLinkSnapshotRow>,
     /// Synchronization change rows keyed by `id`.
     pub sync_changes: Vec<SyncChangeSnapshotRow>,
+}
+
+impl SyncTableSnapshot {
+    /// Returns a new snapshot containing only rows referenced by differences.
+    ///
+    /// # Arguments
+    ///
+    /// * `diffs` - Row differences whose keys should be copied.
+    ///
+    /// # Returns
+    ///
+    /// Returns a partial snapshot in the same table order.
+    pub fn subset_for_diffs(&self, diffs: &[SyncTableDiff]) -> Self {
+        Self {
+            workspaces: self
+                .workspaces
+                .iter()
+                .filter(|row| has_diff(diffs, SyncTableName::Workspaces, &row.id))
+                .cloned()
+                .collect(),
+            devices: self
+                .devices
+                .iter()
+                .filter(|row| has_diff(diffs, SyncTableName::Devices, &row.id))
+                .cloned()
+                .collect(),
+            fields: self
+                .fields
+                .iter()
+                .filter(|row| has_diff(diffs, SyncTableName::Fields, &row.id))
+                .cloned()
+                .collect(),
+            tags: self
+                .tags
+                .iter()
+                .filter(|row| has_diff(diffs, SyncTableName::Tags, &row.id))
+                .cloned()
+                .collect(),
+            notes: self
+                .notes
+                .iter()
+                .filter(|row| has_diff(diffs, SyncTableName::Notes, &row.id))
+                .cloned()
+                .collect(),
+            note_revisions: self
+                .note_revisions
+                .iter()
+                .filter(|row| has_diff(diffs, SyncTableName::NoteRevisions, &row.id))
+                .cloned()
+                .collect(),
+            note_tags: self
+                .note_tags
+                .iter()
+                .filter(|row| {
+                    has_diff(
+                        diffs,
+                        SyncTableName::NoteTags,
+                        &format!("{}:{}:{}", row.workspace_id, row.note_id, row.tag_id),
+                    )
+                })
+                .cloned()
+                .collect(),
+            note_links: self
+                .note_links
+                .iter()
+                .filter(|row| has_diff(diffs, SyncTableName::NoteLinks, &row.id))
+                .cloned()
+                .collect(),
+            sync_changes: self
+                .sync_changes
+                .iter()
+                .filter(|row| has_diff(diffs, SyncTableName::SyncChanges, &row.id))
+                .cloned()
+                .collect(),
+        }
+    }
+
+    /// Returns the total number of rows in this snapshot.
+    ///
+    /// # Returns
+    ///
+    /// Returns the sum of row counts for all synchronized tables.
+    pub fn row_count(&self) -> usize {
+        self.workspaces.len()
+            + self.devices.len()
+            + self.fields.len()
+            + self.tags.len()
+            + self.notes.len()
+            + self.note_revisions.len()
+            + self.note_tags.len()
+            + self.note_links.len()
+            + self.sync_changes.len()
+    }
+}
+
+/// Checks whether a row key appears in a diff list.
+///
+/// # Arguments
+///
+/// * `diffs` - Differences to search.
+/// * `table` - Table name to match.
+/// * `key` - Row key to match.
+///
+/// # Returns
+///
+/// Returns `true` when the row should be included.
+fn has_diff(diffs: &[SyncTableDiff], table: SyncTableName, key: &str) -> bool {
+    diffs
+        .iter()
+        .any(|diff| diff.table == table && diff.key == key)
 }
 
 /// Workspace snapshot row.

@@ -1,9 +1,8 @@
 use crate::config::SyncSettings;
 use crate::repositories::sync::{SyncRepository, SyncStateRecord};
+use crate::sync::diff::{SyncDiffConflict, diff_snapshots};
 use crate::sync::supabase::{SupabaseClient, SupabaseError};
 use std::sync::{Arc, RwLock};
-
-const SYNC_BATCH_LIMIT: i64 = 100;
 
 /// Service for Supabase synchronization workflows.
 #[derive(Debug, Clone)]
@@ -63,10 +62,12 @@ impl SyncService {
     ///
     /// Returns a summary of the sync cycle.
     pub async fn run_once(&self) -> Result<SyncRunSummary, SyncError> {
-        let pushed = self.push().await?.processed;
-        let pulled = self.pull().await?.processed;
+        let summary = self.sync_tables().await?;
 
-        Ok(SyncRunSummary { pushed, pulled })
+        Ok(SyncRunSummary {
+            pushed: summary.pushed,
+            pulled: summary.pulled,
+        })
     }
 
     /// Pushes local changes to Supabase.
@@ -78,28 +79,15 @@ impl SyncService {
         let settings = self.settings();
         self.ensure_enabled(&settings)?;
         let supabase = SupabaseClient::from_settings(&settings);
-        let changes = self
-            .repository
-            .list_pending_push_changes(SYNC_BATCH_LIMIT)
+        let (local, remote) = self.read_snapshots(&supabase).await?;
+        let diff = diff_snapshots(&local, &remote);
+        self.ensure_no_conflicts(&diff.conflicts)?;
+        let write_remote = local.subset_for_diffs(&diff.write_remote);
+        let processed = write_remote.row_count();
+        self.write_remote_snapshot(&supabase, &write_remote).await?;
+        self.verify_direction_converged(&supabase, SyncDirection::Push)
             .await?;
-
-        if !changes.is_empty() {
-            supabase.ensure_default_sync_identity().await?;
-        }
-
-        match supabase.upsert_sync_changes(&changes).await {
-            Ok(()) => {
-                self.repository.mark_push_success(&changes).await?;
-                Ok(SyncDirectionSummary {
-                    processed: changes.len(),
-                })
-            }
-            Err(error) => {
-                let message = error.to_string();
-                self.repository.record_error("push", &message).await?;
-                Err(error.into())
-            }
-        }
+        Ok(SyncDirectionSummary { processed })
     }
 
     /// Pulls remote changes from Supabase.
@@ -111,33 +99,17 @@ impl SyncService {
         let settings = self.settings();
         self.ensure_enabled(&settings)?;
         let supabase = SupabaseClient::from_settings(&settings);
-        let state = self.repository.get_or_create_state("pull").await?;
-
-        match supabase
-            .fetch_remote_changes(
-                state.last_change_created_at,
-                &state.last_change_id,
-                SYNC_BATCH_LIMIT,
-            )
-            .await
-        {
-            Ok(changes) => {
-                let applied = self.repository.apply_remote_changes(&changes).await?;
-                let (created_at, change_id) = changes
-                    .last()
-                    .map(|change| (change.created_at, change.id.as_str()))
-                    .unwrap_or((state.last_change_created_at, state.last_change_id.as_str()));
-                self.repository
-                    .record_success("pull", created_at, change_id)
-                    .await?;
-                Ok(SyncDirectionSummary { processed: applied })
-            }
-            Err(error) => {
-                let message = error.to_string();
-                self.repository.record_error("pull", &message).await?;
-                Err(error.into())
-            }
-        }
+        let (local, remote) = self.read_snapshots(&supabase).await?;
+        let diff = diff_snapshots(&local, &remote);
+        self.ensure_no_conflicts(&diff.conflicts)?;
+        let write_local = remote.subset_for_diffs(&diff.write_local);
+        let processed = write_local.row_count();
+        self.repository
+            .write_local_table_snapshot(&write_local)
+            .await?;
+        self.verify_direction_converged(&supabase, SyncDirection::Pull)
+            .await?;
+        Ok(SyncDirectionSummary { processed })
     }
 
     /// Reads local sync status.
@@ -164,6 +136,178 @@ impl SyncService {
             Err(SyncError::Disabled)
         }
     }
+
+    /// Runs one complete bidirectional table synchronization.
+    ///
+    /// # Returns
+    ///
+    /// Returns the number of rows written to each side.
+    async fn sync_tables(&self) -> Result<TableSyncSummary, SyncError> {
+        let settings = self.settings();
+        self.ensure_enabled(&settings)?;
+        let supabase = SupabaseClient::from_settings(&settings);
+        let (local, remote) = self.read_snapshots(&supabase).await?;
+        let diff = diff_snapshots(&local, &remote);
+        self.ensure_no_conflicts(&diff.conflicts)?;
+
+        let write_local = remote.subset_for_diffs(&diff.write_local);
+        let write_remote = local.subset_for_diffs(&diff.write_remote);
+        let pulled = write_local.row_count();
+        let pushed = write_remote.row_count();
+
+        self.repository
+            .write_local_table_snapshot(&write_local)
+            .await?;
+        self.write_remote_snapshot(&supabase, &write_remote).await?;
+        self.verify_converged(&supabase).await?;
+
+        Ok(TableSyncSummary { pushed, pulled })
+    }
+
+    /// Reads local and Supabase synchronized table snapshots.
+    ///
+    /// # Arguments
+    ///
+    /// * `supabase` - Supabase REST client.
+    ///
+    /// # Returns
+    ///
+    /// Returns local and remote snapshots.
+    async fn read_snapshots(
+        &self,
+        supabase: &SupabaseClient,
+    ) -> Result<
+        (
+            crate::sync::table_snapshot::SyncTableSnapshot,
+            crate::sync::table_snapshot::SyncTableSnapshot,
+        ),
+        SyncError,
+    > {
+        let local = self.repository.read_local_table_snapshot().await?;
+        let remote = supabase.fetch_table_snapshot().await?;
+        Ok((local, remote))
+    }
+
+    /// Writes a partial snapshot to Supabase and records push failures locally.
+    ///
+    /// # Arguments
+    ///
+    /// * `supabase` - Supabase REST client.
+    /// * `snapshot` - Rows to write.
+    ///
+    /// # Returns
+    ///
+    /// Returns `Ok(())` after Supabase accepts the writes.
+    async fn write_remote_snapshot(
+        &self,
+        supabase: &SupabaseClient,
+        snapshot: &crate::sync::table_snapshot::SyncTableSnapshot,
+    ) -> Result<(), SyncError> {
+        if let Err(error) = supabase.upsert_table_snapshot(snapshot).await {
+            let message = error.to_string();
+            self.repository.record_error("push", &message).await?;
+            return Err(error.into());
+        }
+        Ok(())
+    }
+
+    /// Verifies that local and remote snapshots have no remaining differences.
+    ///
+    /// # Arguments
+    ///
+    /// * `supabase` - Supabase REST client.
+    ///
+    /// # Returns
+    ///
+    /// Returns `Ok(())` when both sides match.
+    async fn verify_converged(&self, supabase: &SupabaseClient) -> Result<(), SyncError> {
+        let (local, remote) = self.read_snapshots(supabase).await?;
+        let diff = diff_snapshots(&local, &remote);
+        if diff.write_local.is_empty() && diff.write_remote.is_empty() && diff.conflicts.is_empty()
+        {
+            Ok(())
+        } else {
+            Err(SyncError::NotConverged {
+                write_local: diff.write_local.len(),
+                write_remote: diff.write_remote.len(),
+                conflicts: diff.conflicts.len(),
+            })
+        }
+    }
+
+    /// Verifies that one synchronization direction has no remaining work.
+    ///
+    /// # Arguments
+    ///
+    /// * `supabase` - Supabase REST client.
+    /// * `direction` - Direction that was just written.
+    ///
+    /// # Returns
+    ///
+    /// Returns `Ok(())` when that direction has converged.
+    async fn verify_direction_converged(
+        &self,
+        supabase: &SupabaseClient,
+        direction: SyncDirection,
+    ) -> Result<(), SyncError> {
+        let (local, remote) = self.read_snapshots(supabase).await?;
+        let diff = diff_snapshots(&local, &remote);
+        let remaining = match direction {
+            SyncDirection::Push => diff.write_remote.len(),
+            SyncDirection::Pull => diff.write_local.len(),
+        };
+
+        if remaining == 0 && diff.conflicts.is_empty() {
+            Ok(())
+        } else {
+            Err(SyncError::NotConverged {
+                write_local: diff.write_local.len(),
+                write_remote: diff.write_remote.len(),
+                conflicts: diff.conflicts.len(),
+            })
+        }
+    }
+
+    /// Stops synchronization when differences cannot be resolved safely.
+    ///
+    /// # Arguments
+    ///
+    /// * `conflicts` - Conflicts produced by snapshot comparison.
+    ///
+    /// # Returns
+    ///
+    /// Returns `Ok(())` when there are no conflicts.
+    fn ensure_no_conflicts(&self, conflicts: &[SyncDiffConflict]) -> Result<(), SyncError> {
+        if conflicts.is_empty() {
+            return Ok(());
+        }
+
+        Err(SyncError::Conflict {
+            count: conflicts.len(),
+            first: conflicts
+                .first()
+                .map(|conflict| conflict.reason.clone())
+                .unwrap_or_else(|| "unknown conflict".to_string()),
+        })
+    }
+}
+
+/// Direction for post-write convergence checks.
+#[derive(Debug, Clone, Copy)]
+enum SyncDirection {
+    /// Local SQLite to Supabase.
+    Push,
+    /// Supabase to local SQLite.
+    Pull,
+}
+
+/// Summary for one bidirectional table synchronization.
+#[derive(Debug, Clone)]
+struct TableSyncSummary {
+    /// Rows written to Supabase.
+    pushed: usize,
+    /// Rows written to local SQLite.
+    pulled: usize,
 }
 
 /// Summary for one full sync run.
@@ -203,4 +347,24 @@ pub enum SyncError {
     /// Supabase request failed.
     #[error("{0}")]
     Supabase(#[from] SupabaseError),
+    /// Snapshot comparison found unresolved conflicts.
+    #[error("synchronization conflict count {count}: {first}")]
+    Conflict {
+        /// Number of unresolved conflicts.
+        count: usize,
+        /// First conflict reason.
+        first: String,
+    },
+    /// Post-write verification found remaining differences.
+    #[error(
+        "synchronization did not converge: write_local={write_local}, write_remote={write_remote}, conflicts={conflicts}"
+    )]
+    NotConverged {
+        /// Remaining rows that would be written to local.
+        write_local: usize,
+        /// Remaining rows that would be written to remote.
+        write_remote: usize,
+        /// Remaining conflict count.
+        conflicts: usize,
+    },
 }

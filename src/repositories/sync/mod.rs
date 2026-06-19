@@ -7,6 +7,7 @@ mod payload;
 mod snapshot;
 mod state;
 mod types;
+mod write_snapshot;
 
 pub use types::{DEFAULT_DEVICE_ID, SyncChangeInput, SyncChangeRecord, SyncStateRecord};
 

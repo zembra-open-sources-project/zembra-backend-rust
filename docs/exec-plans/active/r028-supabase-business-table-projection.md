@@ -119,7 +119,7 @@
 
 ### Task #7: 实现九张表差异计算
 
-**Status:** Designed
+**Status:** Finished
 
 **文件：**
 - 创建：`src/sync/diff.rs`
@@ -159,10 +159,11 @@
 - 功能：把 Supabase 有而本地缺失或较新的表数据写入本地 SQLite。
 - 实现说明：本地写入应复用或抽取现有 `apply_remote_changes` 中的表写入能力，但不能只依赖远端 `sync_changes` payload；必须能直接从远端九张表快照写入本地九张表。写入应在事务中执行，失败时回滚，并在无法判断覆盖方向时记录 `sync_conflicts` 或返回错误。
 - 预期验证结果：仓储测试能把远端快照中的 note、revision、tag、note_tag、note_link 和 `sync_changes` 写入空本地库；失败路径不会部分提交。
+- 完成时间：2026-06-19，已通过 `cargo fmt --check`、`cargo test repositories::sync`、`cargo test sync_routes`、`cargo check`。
 
 ### Task #10: 重写 `SyncService::push`、`pull` 和 `run_once`
 
-**Status:** Designed
+**Status:** Finished
 
 **文件：**
 - 修改：`src/services/sync.rs`
@@ -175,6 +176,7 @@
 - 功能：把同步入口改为读取两端九张表、比较差异、写入差异、再复读确认一致。
 - 实现说明：`push` 可以保留 API 名称，但行为必须是把本地较新或远端缺失的数据同步到 Supabase；`pull` 可以保留 API 名称，但行为必须是把远端较新或本地缺失的数据同步到本地；`run_once` 必须执行完整双向流程。每次真实同步完成后要重新读取两端数据并确认无差异，失败时不标记成功。
 - 预期验证结果：路由测试仍能调用 `/sync/run`、`/sync/push`、`/sync/pull`；服务层测试可用假的 Supabase client 或请求构造验证编排，但不能把这些测试记为用户验收通过。
+- 完成时间：2026-06-19，已通过 `cargo fmt --check`、`cargo test repositories::sync`、`cargo test sync_routes`、`cargo check`。
 
 ## Stage #6: 真实 Supabase 验收
 
