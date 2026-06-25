@@ -8,7 +8,7 @@ use super::types::NoteLinkInput;
 use crate::error::ApiError;
 use crate::models::note_link::NoteLinkRecord;
 use crate::repositories::sync::{SyncChangeInput, record_sync_change_in_transaction};
-use crate::repositories::taxonomy::{DEFAULT_WORKSPACE_ID, new_id};
+use crate::repositories::taxonomy::new_id;
 
 impl NotesRepository {
     /// Lists visible outgoing links for a note.
@@ -22,6 +22,7 @@ impl NotesRepository {
     /// Returns links whose target notes are non-deleted and non-archived.
     pub async fn list_visible_outgoing_links(
         &self,
+        workspace_id: &str,
         note_id: &str,
     ) -> Result<Vec<NoteLinkRecord>, ApiError> {
         sqlx::query_as::<_, NoteLinkRecord>(
@@ -34,7 +35,7 @@ impl NotesRepository {
              AND target.archived_at IS NULL \
              ORDER BY note_links.position ASC, note_links.created_at ASC, note_links.id ASC",
         )
-        .bind(DEFAULT_WORKSPACE_ID)
+        .bind(workspace_id)
         .bind(note_id)
         .fetch_all(&self.pool)
         .await
@@ -52,6 +53,7 @@ impl NotesRepository {
     /// Returns links whose source notes are non-deleted and non-archived.
     pub async fn list_visible_backlinks(
         &self,
+        workspace_id: &str,
         note_id: &str,
     ) -> Result<Vec<NoteLinkRecord>, ApiError> {
         sqlx::query_as::<_, NoteLinkRecord>(
@@ -64,7 +66,7 @@ impl NotesRepository {
              AND source.archived_at IS NULL \
              ORDER BY note_links.created_at ASC, note_links.id ASC",
         )
-        .bind(DEFAULT_WORKSPACE_ID)
+        .bind(workspace_id)
         .bind(note_id)
         .fetch_all(&self.pool)
         .await
@@ -85,14 +87,19 @@ impl NotesRepository {
 /// Returns persisted link records.
 pub(super) async fn insert_note_links_in_transaction(
     transaction: &mut Transaction<'_, Sqlite>,
+    workspace_id: &str,
     source_note_id: &str,
     links: &[NoteLinkInput],
 ) -> Result<Vec<NoteLinkRecord>, ApiError> {
     let mut created = Vec::with_capacity(links.len());
 
     for link in links {
-        let target =
-            resolve_visible_note_by_ref_in_transaction(transaction, &link.target_note_ref).await?;
+        let target = resolve_visible_note_by_ref_in_transaction(
+            transaction,
+            workspace_id,
+            &link.target_note_ref,
+        )
+        .await?;
         if target.id == source_note_id {
             return Err(ApiError::Validation);
         }
@@ -104,7 +111,7 @@ pub(super) async fn insert_note_links_in_transaction(
              VALUES (?, ?, ?, ?, ?, ?, unixepoch())",
         )
         .bind(&link_id)
-        .bind(DEFAULT_WORKSPACE_ID)
+        .bind(workspace_id)
         .bind(source_note_id)
         .bind(&target.id)
         .bind(link.anchor_text.as_deref())
@@ -112,16 +119,17 @@ pub(super) async fn insert_note_links_in_transaction(
         .execute(&mut **transaction)
         .await?;
 
-        let record = select_note_link_by_id(transaction, &link_id).await?;
+        let record = select_note_link_by_id(transaction, workspace_id, &link_id).await?;
         record_sync_change_in_transaction(
             transaction,
             SyncChangeInput {
+                workspace_id: workspace_id.to_string(),
                 entity_type: "note_link",
                 entity_id: record.id.clone(),
                 operation: "attach",
                 base_revision_id: None,
                 new_revision_id: None,
-                payload: note_link_payload(&record),
+                payload: note_link_payload(workspace_id, &record),
             },
         )
         .await?;
@@ -144,6 +152,7 @@ pub(super) async fn insert_note_links_in_transaction(
 /// Returns `Ok(())` after link associations and sync changes are updated.
 pub(super) async fn replace_note_links_in_transaction(
     transaction: &mut Transaction<'_, Sqlite>,
+    workspace_id: &str,
     source_note_id: &str,
     links: &[NoteLinkInput],
 ) -> Result<(), ApiError> {
@@ -151,32 +160,33 @@ pub(super) async fn replace_note_links_in_transaction(
         "SELECT id, source_note_id, target_note_id, anchor_text, position, created_at \
          FROM note_links WHERE workspace_id = ? AND source_note_id = ?",
     )
-    .bind(DEFAULT_WORKSPACE_ID)
+    .bind(workspace_id)
     .bind(source_note_id)
     .fetch_all(&mut **transaction)
     .await?;
 
     for link in current_links {
         sqlx::query("DELETE FROM note_links WHERE workspace_id = ? AND id = ?")
-            .bind(DEFAULT_WORKSPACE_ID)
+            .bind(workspace_id)
             .bind(&link.id)
             .execute(&mut **transaction)
             .await?;
         record_sync_change_in_transaction(
             transaction,
             SyncChangeInput {
+                workspace_id: workspace_id.to_string(),
                 entity_type: "note_link",
                 entity_id: link.id.clone(),
                 operation: "detach",
                 base_revision_id: None,
                 new_revision_id: None,
-                payload: note_link_payload(&link),
+                payload: note_link_payload(workspace_id, &link),
             },
         )
         .await?;
     }
 
-    insert_note_links_in_transaction(transaction, source_note_id, links).await?;
+    insert_note_links_in_transaction(transaction, workspace_id, source_note_id, links).await?;
 
     Ok(())
 }

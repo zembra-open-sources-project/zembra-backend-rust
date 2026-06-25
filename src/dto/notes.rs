@@ -11,8 +11,19 @@ use crate::models::tag::TagRecord;
 /// Query parameters used by the notes list endpoint.
 #[derive(Debug, Clone, Deserialize, IntoParams)]
 pub struct ListNotesQuery {
+    /// Workspace UUID used as the request scope.
+    #[param(required = true)]
+    pub workspace_id: Option<String>,
     /// Maximum number of notes to return.
     pub limit: Option<i64>,
+}
+
+/// Query parameters used by note endpoints that otherwise have no query input.
+#[derive(Debug, Clone, Deserialize, IntoParams)]
+pub struct WorkspaceQuery {
+    /// Workspace UUID used as the request scope.
+    #[param(required = true)]
+    pub workspace_id: Option<String>,
 }
 
 /// Request body used by the recent notes endpoint.
@@ -31,6 +42,9 @@ pub struct RecentNotesRequest {
 /// Query parameters used by the random tags endpoint.
 #[derive(Debug, Clone, Deserialize, Validate, IntoParams)]
 pub struct RandomTagsQuery {
+    /// Workspace UUID used as the request scope.
+    #[param(required = true)]
+    pub workspace_id: Option<String>,
     /// Number of random tags to return.
     #[validate(range(min = 1, max = 20))]
     pub n: Option<i64>,
@@ -42,6 +56,9 @@ pub struct RandomTagsQuery {
 /// Query parameters used by the random fields endpoint.
 #[derive(Debug, Clone, Deserialize, Validate, IntoParams)]
 pub struct RandomFieldsQuery {
+    /// Workspace UUID used as the request scope.
+    #[param(required = true)]
+    pub workspace_id: Option<String>,
     /// Number of random fields to return.
     #[validate(range(min = 1, max = 20))]
     pub n: Option<i64>,
@@ -53,6 +70,9 @@ pub struct RandomFieldsQuery {
 /// Query parameters used by the random notes endpoint.
 #[derive(Debug, Clone, Deserialize, Validate, IntoParams)]
 pub struct RandomNotesQuery {
+    /// Workspace UUID used as the request scope.
+    #[param(required = true)]
+    pub workspace_id: Option<String>,
     /// Number of random notes to return.
     #[validate(range(min = 1, max = 50))]
     pub n: i64,
@@ -61,6 +81,9 @@ pub struct RandomNotesQuery {
 /// Query parameters used by the notes-by-date endpoint.
 #[derive(Debug, Clone, Deserialize, Validate, IntoParams)]
 pub struct NotesByDateQuery {
+    /// Workspace UUID used as the request scope.
+    #[param(required = true)]
+    pub workspace_id: Option<String>,
     /// Server-local creation date in `YYYY-MM-DD` format.
     #[validate(required, custom(function = "validate_note_date"))]
     pub date: Option<String>,

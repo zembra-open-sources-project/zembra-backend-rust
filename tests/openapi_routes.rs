@@ -108,6 +108,28 @@ async fn openapi_json_lists_runtime_api_paths() {
             .get("workspace_name")
             .is_some()
     );
+
+    for (path, method) in [
+        ("/notes", "get"),
+        ("/notes", "post"),
+        ("/notes/batch", "post"),
+        ("/notes/recent", "post"),
+        ("/notes/stats/daily-counts", "get"),
+        ("/notes/by-date", "get"),
+        ("/random/notes", "get"),
+        ("/random/tags", "get"),
+        ("/random/fields", "get"),
+        ("/notes/{note_ref}", "get"),
+        ("/notes/{note_ref}", "patch"),
+        ("/notes/{note_ref}", "delete"),
+        ("/notes/{note_ref}/archive", "post"),
+        ("/notes/{note_ref}/tags", "get"),
+        ("/notes/{note_ref}/tags/{tag_name}", "put"),
+        ("/notes/{note_ref}/tags/{tag_name}", "delete"),
+        ("/notes/{note_ref}/revisions", "get"),
+    ] {
+        assert_has_required_workspace_query(&body, path, method);
+    }
 }
 
 #[tokio::test]
@@ -121,4 +143,23 @@ async fn swagger_ui_is_available() {
     .await;
 
     assert_eq!(response.status(), StatusCode::OK);
+}
+
+/// Asserts that an OpenAPI operation exposes required `workspace_id` query scope.
+///
+/// # Arguments
+///
+/// * `body` - Parsed OpenAPI JSON.
+/// * `path` - OpenAPI path to inspect.
+/// * `method` - Lowercase HTTP method to inspect.
+fn assert_has_required_workspace_query(body: &serde_json::Value, path: &str, method: &str) {
+    let parameters = body["paths"][path][method]["parameters"]
+        .as_array()
+        .unwrap_or_else(|| panic!("{method} {path} should expose parameters"));
+    let workspace = parameters
+        .iter()
+        .find(|parameter| parameter["name"] == "workspace_id" && parameter["in"] == "query")
+        .unwrap_or_else(|| panic!("{method} {path} should expose workspace_id query"));
+
+    assert_eq!(workspace["required"], true);
 }

@@ -52,11 +52,15 @@ impl NotesService {
     /// # Returns
     ///
     /// Returns the created note response.
-    pub async fn create_note(&self, request: CreateNoteRequest) -> Result<NoteResponse, ApiError> {
+    pub async fn create_note(
+        &self,
+        workspace_id: &str,
+        request: CreateNoteRequest,
+    ) -> Result<NoteResponse, ApiError> {
         let input = normalize_create_request(request)?;
-        let created = self.repository.create_note(input).await?;
+        let created = self.repository.create_note(workspace_id, input).await?;
 
-        self.created_note_to_response(created).await
+        self.created_note_to_response(workspace_id, created).await
     }
 
     /// Creates notes in a single transaction.
@@ -70,6 +74,7 @@ impl NotesService {
     /// Returns all created notes.
     pub async fn create_notes_batch(
         &self,
+        workspace_id: &str,
         items: Vec<CreateNoteRequest>,
     ) -> Result<BatchCreateNotesResponse, ApiError> {
         let inputs = items
@@ -78,12 +83,12 @@ impl NotesService {
             .collect::<Result<Vec<_>, _>>()?;
         let notes = self
             .repository
-            .create_notes_batch(inputs)
+            .create_notes_batch(workspace_id, inputs)
             .await?
             .into_iter();
         let mut responses = Vec::new();
         for created in notes {
-            responses.push(self.created_note_to_response(created).await?);
+            responses.push(self.created_note_to_response(workspace_id, created).await?);
         }
 
         Ok(BatchCreateNotesResponse { notes: responses })
@@ -98,8 +103,12 @@ impl NotesService {
     /// # Returns
     ///
     /// Returns active note records.
-    pub async fn list_notes(&self, limit: Option<i64>) -> Result<Vec<NoteRecord>, ApiError> {
-        self.repository.list_notes(limit).await
+    pub async fn list_notes(
+        &self,
+        workspace_id: &str,
+        limit: Option<i64>,
+    ) -> Result<Vec<NoteRecord>, ApiError> {
+        self.repository.list_notes(workspace_id, limit).await
     }
 
     /// Lists recent notes for Web presentation.
@@ -113,12 +122,18 @@ impl NotesService {
     /// Returns non-deleted and non-archived note records ordered by update time.
     pub async fn recent_notes(
         &self,
+        workspace_id: &str,
         request: RecentNotesRequest,
     ) -> Result<Vec<NoteRecord>, ApiError> {
         let limit = request.limit.unwrap_or(50);
         let role_filter = RecentNotesRoleFilter::from_request(request.role.as_deref())?;
         self.repository
-            .list_recent_notes(limit, request.note_uuid.as_deref(), role_filter)
+            .list_recent_notes(
+                workspace_id,
+                limit,
+                request.note_uuid.as_deref(),
+                role_filter,
+            )
             .await
     }
 
@@ -131,8 +146,14 @@ impl NotesService {
     /// # Returns
     ///
     /// Returns random non-deleted and non-archived note records.
-    pub async fn random_notes(&self, query: RandomNotesQuery) -> Result<Vec<NoteRecord>, ApiError> {
-        self.repository.list_random_notes(query.n).await
+    pub async fn random_notes(
+        &self,
+        workspace_id: &str,
+        query: RandomNotesQuery,
+    ) -> Result<Vec<NoteRecord>, ApiError> {
+        self.repository
+            .list_random_notes(workspace_id, query.n)
+            .await
     }
 
     /// Counts visible notes created per server-local day for the past 30 days.
@@ -140,8 +161,11 @@ impl NotesService {
     /// # Returns
     ///
     /// Returns a fixed 30-day series ordered by date ascending.
-    pub async fn daily_note_counts(&self) -> Result<DailyNoteCountsResponse, ApiError> {
-        self.daily_note_counts_for_today(Local::now().date_naive())
+    pub async fn daily_note_counts(
+        &self,
+        workspace_id: &str,
+    ) -> Result<DailyNoteCountsResponse, ApiError> {
+        self.daily_note_counts_for_today(workspace_id, Local::now().date_naive())
             .await
     }
 
@@ -156,6 +180,7 @@ impl NotesService {
     /// Returns visible notes created on the requested local date.
     pub async fn notes_by_date(
         &self,
+        workspace_id: &str,
         query: NotesByDateQuery,
     ) -> Result<NotesByDateResponse, ApiError> {
         let date = query.date.ok_or(ApiError::Validation)?;
@@ -165,7 +190,7 @@ impl NotesService {
         let end_timestamp = local_start_of_day_timestamp(parsed_date + Duration::days(1));
         let notes = self
             .repository
-            .list_visible_notes_created_between(start_timestamp, end_timestamp)
+            .list_visible_notes_created_between(workspace_id, start_timestamp, end_timestamp)
             .await?;
 
         Ok(NotesByDateResponse { date, notes })
@@ -182,13 +207,14 @@ impl NotesService {
     /// Returns a fixed 30-day series ordered by date ascending.
     async fn daily_note_counts_for_today(
         &self,
+        workspace_id: &str,
         today: NaiveDate,
     ) -> Result<DailyNoteCountsResponse, ApiError> {
         let start_date = today - Duration::days(DAILY_NOTE_COUNT_DAYS - 1);
         let start_timestamp = local_start_of_day_timestamp(start_date);
         let counts_by_date: HashMap<_, _> = self
             .repository
-            .daily_note_counts_since(start_timestamp)
+            .daily_note_counts_since(workspace_id, start_timestamp)
             .await?
             .into_iter()
             .map(|row| (row.date, row.count))
@@ -217,18 +243,19 @@ impl NotesService {
     /// Returns tagged note groups under the `tagged_notes` response field.
     pub async fn random_tagged_notes(
         &self,
+        workspace_id: &str,
         query: RandomTagsQuery,
     ) -> Result<TaggedNotesResponse, ApiError> {
         let tag_limit = query.n.unwrap_or(3);
         let mut remaining_notes = query.count.unwrap_or(20);
-        let tags = self.repository.random_tags(tag_limit).await?;
+        let tags = self.repository.random_tags(workspace_id, tag_limit).await?;
         let mut tagged_notes = Vec::with_capacity(tags.len());
 
         for tag in tags {
             let notes = if remaining_notes > 0 {
                 let notes = self
                     .repository
-                    .list_visible_notes_by_tag(&tag.id, remaining_notes)
+                    .list_visible_notes_by_tag(workspace_id, &tag.id, remaining_notes)
                     .await?;
                 remaining_notes -= notes.len() as i64;
                 notes
@@ -252,18 +279,22 @@ impl NotesService {
     /// Returns field note groups under the `field_notes` response field.
     pub async fn random_field_notes(
         &self,
+        workspace_id: &str,
         query: RandomFieldsQuery,
     ) -> Result<FieldNotesResponse, ApiError> {
         let field_limit = query.n.unwrap_or(3);
         let mut remaining_notes = query.count.unwrap_or(20);
-        let fields = self.repository.random_fields(field_limit).await?;
+        let fields = self
+            .repository
+            .random_fields(workspace_id, field_limit)
+            .await?;
         let mut field_notes = Vec::with_capacity(fields.len());
 
         for field in fields {
             let notes = if remaining_notes > 0 {
                 let notes = self
                     .repository
-                    .list_visible_notes_by_field(&field.id, remaining_notes)
+                    .list_visible_notes_by_field(workspace_id, &field.id, remaining_notes)
                     .await?;
                 remaining_notes -= notes.len() as i64;
                 notes
@@ -285,9 +316,16 @@ impl NotesService {
     /// # Returns
     ///
     /// Returns the matching note.
-    pub async fn get_note(&self, note_ref: &str) -> Result<NoteResponse, ApiError> {
-        let note = self.repository.get_note_by_ref(note_ref).await?;
-        self.note_to_response(note).await
+    pub async fn get_note(
+        &self,
+        workspace_id: &str,
+        note_ref: &str,
+    ) -> Result<NoteResponse, ApiError> {
+        let note = self
+            .repository
+            .get_note_by_ref(workspace_id, note_ref)
+            .await?;
+        self.note_to_response(workspace_id, note).await
     }
 
     /// Updates note content.
@@ -302,12 +340,16 @@ impl NotesService {
     /// Returns the updated note.
     pub async fn update_note(
         &self,
+        workspace_id: &str,
         note_ref: &str,
         request: UpdateNoteRequest,
     ) -> Result<NoteResponse, ApiError> {
         let input = normalize_update_request(request)?;
-        let note = self.repository.update_note(note_ref, input).await?;
-        self.note_to_response(note).await
+        let note = self
+            .repository
+            .update_note(workspace_id, note_ref, input)
+            .await?;
+        self.note_to_response(workspace_id, note).await
     }
 
     /// Archives a note.
@@ -319,8 +361,12 @@ impl NotesService {
     /// # Returns
     ///
     /// Returns the archived note.
-    pub async fn archive_note(&self, note_ref: &str) -> Result<NoteRecord, ApiError> {
-        self.repository.archive_note(note_ref).await
+    pub async fn archive_note(
+        &self,
+        workspace_id: &str,
+        note_ref: &str,
+    ) -> Result<NoteRecord, ApiError> {
+        self.repository.archive_note(workspace_id, note_ref).await
     }
 
     /// Soft deletes a note.
@@ -332,8 +378,8 @@ impl NotesService {
     /// # Returns
     ///
     /// Returns `Ok(())` after deletion.
-    pub async fn delete_note(&self, note_ref: &str) -> Result<(), ApiError> {
-        self.repository.delete_note(note_ref).await
+    pub async fn delete_note(&self, workspace_id: &str, note_ref: &str) -> Result<(), ApiError> {
+        self.repository.delete_note(workspace_id, note_ref).await
     }
 
     /// Lists note revisions.
@@ -347,9 +393,12 @@ impl NotesService {
     /// Returns note revisions.
     pub async fn list_note_revisions(
         &self,
+        workspace_id: &str,
         note_ref: &str,
     ) -> Result<Vec<NoteRevisionRecord>, ApiError> {
-        self.repository.list_note_revisions(note_ref).await
+        self.repository
+            .list_note_revisions(workspace_id, note_ref)
+            .await
     }
 
     /// Lists note tags.
@@ -361,8 +410,12 @@ impl NotesService {
     /// # Returns
     ///
     /// Returns note tags.
-    pub async fn list_note_tags(&self, note_ref: &str) -> Result<Vec<TagRecord>, ApiError> {
-        self.repository.list_note_tags(note_ref).await
+    pub async fn list_note_tags(
+        &self,
+        workspace_id: &str,
+        note_ref: &str,
+    ) -> Result<Vec<TagRecord>, ApiError> {
+        self.repository.list_note_tags(workspace_id, note_ref).await
     }
 
     /// Adds a tag to a note.
@@ -377,11 +430,14 @@ impl NotesService {
     /// Returns the associated tag.
     pub async fn add_tag_to_note(
         &self,
+        workspace_id: &str,
         note_ref: &str,
         tag_name: &str,
     ) -> Result<TagRecord, ApiError> {
         let tag_name = normalize_required_text(tag_name)?;
-        self.repository.add_tag_to_note(note_ref, &tag_name).await
+        self.repository
+            .add_tag_to_note(workspace_id, note_ref, &tag_name)
+            .await
     }
 
     /// Removes a tag from a note.
@@ -396,12 +452,13 @@ impl NotesService {
     /// Returns `Ok(())` after the association is removed.
     pub async fn remove_tag_from_note(
         &self,
+        workspace_id: &str,
         note_ref: &str,
         tag_name: &str,
     ) -> Result<(), ApiError> {
         let tag_name = normalize_required_text(tag_name)?;
         self.repository
-            .remove_tag_from_note(note_ref, &tag_name)
+            .remove_tag_from_note(workspace_id, note_ref, &tag_name)
             .await
     }
 
@@ -416,11 +473,12 @@ impl NotesService {
     /// Returns API note response with link metadata.
     async fn created_note_to_response(
         &self,
+        workspace_id: &str,
         created: CreatedNote,
     ) -> Result<NoteResponse, ApiError> {
         let backlinks = self
             .repository
-            .list_visible_backlinks(&created.note.id)
+            .list_visible_backlinks(workspace_id, &created.note.id)
             .await?;
 
         Ok(NoteResponse {
@@ -444,23 +502,30 @@ impl NotesService {
     /// # Returns
     ///
     /// Returns API note response with resolved metadata.
-    async fn note_to_response(&self, note: NoteRecord) -> Result<NoteResponse, ApiError> {
+    async fn note_to_response(
+        &self,
+        workspace_id: &str,
+        note: NoteRecord,
+    ) -> Result<NoteResponse, ApiError> {
         let field = self
             .repository
-            .field_name_by_id(note.field_id.as_deref())
+            .field_name_by_id(workspace_id, note.field_id.as_deref())
             .await?;
         let tags = self
             .repository
-            .list_note_tags_by_id(&note.id)
+            .list_note_tags_by_id(workspace_id, &note.id)
             .await?
             .into_iter()
             .map(|tag| tag.path)
             .collect();
         let outgoing_links = self
             .repository
-            .list_visible_outgoing_links(&note.id)
+            .list_visible_outgoing_links(workspace_id, &note.id)
             .await?;
-        let backlinks = self.repository.list_visible_backlinks(&note.id).await?;
+        let backlinks = self
+            .repository
+            .list_visible_backlinks(workspace_id, &note.id)
+            .await?;
 
         Ok(NoteResponse {
             metadata: NoteMetadata {

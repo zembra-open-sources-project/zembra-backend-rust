@@ -2,6 +2,7 @@
 
 use zembra_backend_rust::app::AppState;
 use zembra_backend_rust::dto::notes::{CreateNoteRequest, NoteLinkRequest};
+use zembra_backend_rust::repositories::taxonomy::DEFAULT_WORKSPACE_ID;
 
 /// Builder for creating notes in integration tests.
 #[derive(Debug, Clone)]
@@ -118,17 +119,34 @@ impl TestNoteBuilder {
     ///
     /// Returns the created note ID.
     pub async fn create(self, state: &AppState) -> String {
+        self.create_in_workspace(state, DEFAULT_WORKSPACE_ID).await
+    }
+
+    /// Creates the note in a specific workspace through the notes service.
+    ///
+    /// # Arguments
+    ///
+    /// * `state` - Shared application state.
+    /// * `workspace_id` - Workspace identifier to scope note creation.
+    ///
+    /// # Returns
+    ///
+    /// Returns the created note ID.
+    pub async fn create_in_workspace(self, state: &AppState, workspace_id: &str) -> String {
         let service =
             zembra_backend_rust::services::notes::NotesService::new(state.database.pool.clone());
         service
-            .create_note(CreateNoteRequest {
-                content: self.content,
-                field: self.field,
-                tags: self.tags,
-                role: self.role,
-                device_id: self.device_id,
-                links: self.links,
-            })
+            .create_note(
+                workspace_id,
+                CreateNoteRequest {
+                    content: self.content,
+                    field: self.field,
+                    tags: self.tags,
+                    role: self.role,
+                    device_id: self.device_id,
+                    links: self.links,
+                },
+            )
             .await
             .unwrap()
             .note

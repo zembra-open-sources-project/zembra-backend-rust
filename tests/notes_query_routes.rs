@@ -3,6 +3,7 @@ mod support;
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use serde_json::json;
+use zembra_backend_rust::repositories::taxonomy::DEFAULT_WORKSPACE_ID;
 
 #[tokio::test]
 async fn recent_notes_route_returns_ordered_visible_notes() {
@@ -18,14 +19,20 @@ async fn recent_notes_route_returns_ordered_visible_notes() {
 
     let service =
         zembra_backend_rust::services::notes::NotesService::new(state.database.pool.clone());
-    service.archive_note(&archived).await.unwrap();
-    service.delete_note(&deleted).await.unwrap();
+    service
+        .archive_note(DEFAULT_WORKSPACE_ID, &archived)
+        .await
+        .unwrap();
+    service
+        .delete_note(DEFAULT_WORKSPACE_ID, &deleted)
+        .await
+        .unwrap();
 
     let response = support::app::send_with_state(
         state,
         Request::builder()
             .method("POST")
-            .uri("/notes/recent")
+            .uri(format!("/notes/recent?workspace_id={DEFAULT_WORKSPACE_ID}"))
             .header("content-type", "application/json")
             .body(Body::from(json!({"limit": 10}).to_string()))
             .unwrap(),
@@ -50,7 +57,7 @@ async fn recent_notes_route_uses_default_and_custom_limit() {
         state,
         Request::builder()
             .method("POST")
-            .uri("/notes/recent")
+            .uri(format!("/notes/recent?workspace_id={DEFAULT_WORKSPACE_ID}"))
             .header("content-type", "application/json")
             .body(Body::from(json!({ "limit": 1 }).to_string()))
             .unwrap(),
@@ -83,7 +90,7 @@ async fn recent_notes_route_filters_by_role() {
         state,
         Request::builder()
             .method("POST")
-            .uri("/notes/recent")
+            .uri(format!("/notes/recent?workspace_id={DEFAULT_WORKSPACE_ID}"))
             .header("content-type", "application/json")
             .body(Body::from(json!({ "role": "human" }).to_string()))
             .unwrap(),
@@ -119,7 +126,7 @@ async fn recent_notes_route_accepts_role_case_insensitively_and_both() {
         state.clone(),
         Request::builder()
             .method("POST")
-            .uri("/notes/recent")
+            .uri(format!("/notes/recent?workspace_id={DEFAULT_WORKSPACE_ID}"))
             .header("content-type", "application/json")
             .body(Body::from(json!({ "role": "AGENT" }).to_string()))
             .unwrap(),
@@ -132,7 +139,7 @@ async fn recent_notes_route_accepts_role_case_insensitively_and_both() {
         state,
         Request::builder()
             .method("POST")
-            .uri("/notes/recent")
+            .uri(format!("/notes/recent?workspace_id={DEFAULT_WORKSPACE_ID}"))
             .header("content-type", "application/json")
             .body(Body::from(json!({ "role": "Both" }).to_string()))
             .unwrap(),
@@ -153,7 +160,7 @@ async fn recent_notes_route_rejects_invalid_role() {
     let response = support::app::send(
         Request::builder()
             .method("POST")
-            .uri("/notes/recent")
+            .uri(format!("/notes/recent?workspace_id={DEFAULT_WORKSPACE_ID}"))
             .header("content-type", "application/json")
             .body(Body::from(json!({ "role": "robot" }).to_string()))
             .unwrap(),
@@ -180,7 +187,7 @@ async fn recent_notes_route_uses_note_uuid_cursor() {
         state,
         Request::builder()
             .method("POST")
-            .uri("/notes/recent")
+            .uri(format!("/notes/recent?workspace_id={DEFAULT_WORKSPACE_ID}"))
             .header("content-type", "application/json")
             .body(Body::from(
                 json!({
@@ -205,7 +212,7 @@ async fn recent_notes_route_rejects_invalid_limit() {
     let response = support::app::send(
         Request::builder()
             .method("POST")
-            .uri("/notes/recent")
+            .uri(format!("/notes/recent?workspace_id={DEFAULT_WORKSPACE_ID}"))
             .header("content-type", "application/json")
             .body(Body::from(json!({ "limit": 101 }).to_string()))
             .unwrap(),
@@ -223,7 +230,7 @@ async fn recent_notes_route_rejects_invalid_note_uuid() {
     let response = support::app::send(
         Request::builder()
             .method("POST")
-            .uri("/notes/recent")
+            .uri(format!("/notes/recent?workspace_id={DEFAULT_WORKSPACE_ID}"))
             .header("content-type", "application/json")
             .body(Body::from(json!({ "note_uuid": "abcd" }).to_string()))
             .unwrap(),
@@ -242,13 +249,16 @@ async fn recent_notes_route_returns_not_found_for_hidden_note_uuid() {
     let archived = support::notes::create_note(&state, "archived").await;
     let service =
         zembra_backend_rust::services::notes::NotesService::new(state.database.pool.clone());
-    service.archive_note(&archived).await.unwrap();
+    service
+        .archive_note(DEFAULT_WORKSPACE_ID, &archived)
+        .await
+        .unwrap();
 
     let response = support::app::send_with_state(
         state,
         Request::builder()
             .method("POST")
-            .uri("/notes/recent")
+            .uri(format!("/notes/recent?workspace_id={DEFAULT_WORKSPACE_ID}"))
             .header("content-type", "application/json")
             .body(Body::from(json!({ "note_uuid": archived }).to_string()))
             .unwrap(),
@@ -288,13 +298,21 @@ async fn daily_note_counts_route_returns_thirty_local_days_with_counts() {
 
     let service =
         zembra_backend_rust::services::notes::NotesService::new(state.database.pool.clone());
-    service.archive_note(&archived_today).await.unwrap();
-    service.delete_note(&deleted_yesterday).await.unwrap();
+    service
+        .archive_note(DEFAULT_WORKSPACE_ID, &archived_today)
+        .await
+        .unwrap();
+    service
+        .delete_note(DEFAULT_WORKSPACE_ID, &deleted_yesterday)
+        .await
+        .unwrap();
 
     let response = support::app::send_with_state(
         state,
         Request::builder()
-            .uri("/notes/stats/daily-counts")
+            .uri(format!(
+                "/notes/stats/daily-counts?workspace_id={DEFAULT_WORKSPACE_ID}"
+            ))
             .body(Body::empty())
             .unwrap(),
     )
@@ -348,7 +366,9 @@ async fn notes_by_date_route_returns_ordered_visible_notes_for_date() {
     let response = support::app::send_with_state(
         state,
         Request::builder()
-            .uri(format!("/notes/by-date?date={target_key}"))
+            .uri(format!(
+                "/notes/by-date?date={target_key}&workspace_id={DEFAULT_WORKSPACE_ID}"
+            ))
             .body(Body::empty())
             .unwrap(),
     )
@@ -380,14 +400,22 @@ async fn notes_by_date_route_filters_archived_and_deleted_notes() {
 
     let service =
         zembra_backend_rust::services::notes::NotesService::new(state.database.pool.clone());
-    service.archive_note(&archived).await.unwrap();
-    service.delete_note(&deleted).await.unwrap();
+    service
+        .archive_note(DEFAULT_WORKSPACE_ID, &archived)
+        .await
+        .unwrap();
+    service
+        .delete_note(DEFAULT_WORKSPACE_ID, &deleted)
+        .await
+        .unwrap();
 
     let target_key = target_date.format("%Y-%m-%d").to_string();
     let response = support::app::send_with_state(
         state,
         Request::builder()
-            .uri(format!("/notes/by-date?date={target_key}"))
+            .uri(format!(
+                "/notes/by-date?date={target_key}&workspace_id={DEFAULT_WORKSPACE_ID}"
+            ))
             .body(Body::empty())
             .unwrap(),
     )
@@ -404,7 +432,9 @@ async fn notes_by_date_route_filters_archived_and_deleted_notes() {
 async fn notes_by_date_route_returns_empty_for_date_without_notes() {
     let response = support::app::send(
         Request::builder()
-            .uri("/notes/by-date?date=2026-05-22")
+            .uri(format!(
+                "/notes/by-date?date=2026-05-22&workspace_id={DEFAULT_WORKSPACE_ID}"
+            ))
             .body(Body::empty())
             .unwrap(),
     )
@@ -419,7 +449,10 @@ async fn notes_by_date_route_returns_empty_for_date_without_notes() {
 
 #[tokio::test]
 async fn notes_by_date_route_rejects_missing_or_invalid_date() {
-    for uri in ["/notes/by-date", "/notes/by-date?date=2026-13-40"] {
+    for uri in [
+        format!("/notes/by-date?workspace_id={DEFAULT_WORKSPACE_ID}"),
+        format!("/notes/by-date?date=2026-13-40&workspace_id={DEFAULT_WORKSPACE_ID}"),
+    ] {
         let response =
             support::app::send(Request::builder().uri(uri).body(Body::empty()).unwrap()).await;
         let status = response.status();
@@ -439,13 +472,21 @@ async fn random_notes_route_returns_random_visible_notes() {
     let deleted = support::notes::create_note(&state, "deleted").await;
     let service =
         zembra_backend_rust::services::notes::NotesService::new(state.database.pool.clone());
-    service.archive_note(&archived).await.unwrap();
-    service.delete_note(&deleted).await.unwrap();
+    service
+        .archive_note(DEFAULT_WORKSPACE_ID, &archived)
+        .await
+        .unwrap();
+    service
+        .delete_note(DEFAULT_WORKSPACE_ID, &deleted)
+        .await
+        .unwrap();
 
     let response = support::app::send_with_state(
         state,
         Request::builder()
-            .uri("/random/notes?n=50")
+            .uri(format!(
+                "/random/notes?n=50&workspace_id={DEFAULT_WORKSPACE_ID}"
+            ))
             .body(Body::empty())
             .unwrap(),
     )
@@ -473,7 +514,9 @@ async fn random_notes_route_applies_limit() {
     let response = support::app::send_with_state(
         state,
         Request::builder()
-            .uri("/random/notes?n=2")
+            .uri(format!(
+                "/random/notes?n=2&workspace_id={DEFAULT_WORKSPACE_ID}"
+            ))
             .body(Body::empty())
             .unwrap(),
     )
@@ -489,7 +532,9 @@ async fn random_notes_route_applies_limit() {
 async fn random_notes_route_returns_empty_when_no_visible_notes_exist() {
     let response = support::app::send(
         Request::builder()
-            .uri("/random/notes?n=5")
+            .uri(format!(
+                "/random/notes?n=5&workspace_id={DEFAULT_WORKSPACE_ID}"
+            ))
             .body(Body::empty())
             .unwrap(),
     )
@@ -503,7 +548,10 @@ async fn random_notes_route_returns_empty_when_no_visible_notes_exist() {
 
 #[tokio::test]
 async fn random_notes_route_rejects_invalid_n() {
-    for uri in ["/random/notes?n=0", "/random/notes?n=51"] {
+    for uri in [
+        format!("/random/notes?n=0&workspace_id={DEFAULT_WORKSPACE_ID}"),
+        format!("/random/notes?n=51&workspace_id={DEFAULT_WORKSPACE_ID}"),
+    ] {
         let response =
             support::app::send(Request::builder().uri(uri).body(Body::empty()).unwrap()).await;
         let status = response.status();
@@ -531,13 +579,21 @@ async fn random_tags_route_groups_visible_notes_by_tag() {
         support::notes::create_tagged_note(&state, "deleted", vec!["sqlite".to_string()]).await;
     let service =
         zembra_backend_rust::services::notes::NotesService::new(state.database.pool.clone());
-    service.archive_note(&archived).await.unwrap();
-    service.delete_note(&deleted).await.unwrap();
+    service
+        .archive_note(DEFAULT_WORKSPACE_ID, &archived)
+        .await
+        .unwrap();
+    service
+        .delete_note(DEFAULT_WORKSPACE_ID, &deleted)
+        .await
+        .unwrap();
 
     let response = support::app::send_with_state(
         state,
         Request::builder()
-            .uri("/random/tags?n=2&count=10")
+            .uri(format!(
+                "/random/tags?n=2&count=10&workspace_id={DEFAULT_WORKSPACE_ID}"
+            ))
             .body(Body::empty())
             .unwrap(),
     )
@@ -583,7 +639,9 @@ async fn random_tags_route_limits_cumulative_notes() {
     let response = support::app::send_with_state(
         state,
         Request::builder()
-            .uri("/random/tags?n=1&count=2")
+            .uri(format!(
+                "/random/tags?n=1&count=2&workspace_id={DEFAULT_WORKSPACE_ID}"
+            ))
             .body(Body::empty())
             .unwrap(),
     )
@@ -610,7 +668,9 @@ async fn random_tags_route_returns_existing_tags_when_n_is_larger() {
     let response = support::app::send_with_state(
         state,
         Request::builder()
-            .uri("/random/tags?n=20")
+            .uri(format!(
+                "/random/tags?n=20&workspace_id={DEFAULT_WORKSPACE_ID}"
+            ))
             .body(Body::empty())
             .unwrap(),
     )
@@ -640,7 +700,7 @@ async fn random_tags_route_uses_default_limit() {
     let response = support::app::send_with_state(
         state,
         Request::builder()
-            .uri("/random/tags")
+            .uri(format!("/random/tags?workspace_id={DEFAULT_WORKSPACE_ID}"))
             .body(Body::empty())
             .unwrap(),
     )
@@ -664,10 +724,10 @@ async fn random_tags_route_uses_default_limit() {
 #[tokio::test]
 async fn random_tags_route_rejects_invalid_query_values() {
     for uri in [
-        "/random/tags?n=0",
-        "/random/tags?n=21",
-        "/random/tags?count=0",
-        "/random/tags?count=101",
+        format!("/random/tags?n=0&workspace_id={DEFAULT_WORKSPACE_ID}"),
+        format!("/random/tags?n=21&workspace_id={DEFAULT_WORKSPACE_ID}"),
+        format!("/random/tags?count=0&workspace_id={DEFAULT_WORKSPACE_ID}"),
+        format!("/random/tags?count=101&workspace_id={DEFAULT_WORKSPACE_ID}"),
     ] {
         let response =
             support::app::send(Request::builder().uri(uri).body(Body::empty()).unwrap()).await;
@@ -689,7 +749,9 @@ async fn random_fields_route_limits_cumulative_notes() {
     let response = support::app::send_with_state(
         state,
         Request::builder()
-            .uri("/random/fields?n=1&count=2")
+            .uri(format!(
+                "/random/fields?n=1&count=2&workspace_id={DEFAULT_WORKSPACE_ID}"
+            ))
             .body(Body::empty())
             .unwrap(),
     )
@@ -715,13 +777,21 @@ async fn random_fields_route_filters_hidden_notes_and_keeps_empty_fields() {
     let deleted = support::notes::create_field_note(&state, "deleted", "empty").await;
     let service =
         zembra_backend_rust::services::notes::NotesService::new(state.database.pool.clone());
-    service.archive_note(&archived).await.unwrap();
-    service.delete_note(&deleted).await.unwrap();
+    service
+        .archive_note(DEFAULT_WORKSPACE_ID, &archived)
+        .await
+        .unwrap();
+    service
+        .delete_note(DEFAULT_WORKSPACE_ID, &deleted)
+        .await
+        .unwrap();
 
     let response = support::app::send_with_state(
         state,
         Request::builder()
-            .uri("/random/fields?n=2&count=10")
+            .uri(format!(
+                "/random/fields?n=2&count=10&workspace_id={DEFAULT_WORKSPACE_ID}"
+            ))
             .body(Body::empty())
             .unwrap(),
     )
@@ -758,7 +828,9 @@ async fn random_fields_route_returns_existing_fields_when_n_is_larger() {
     let response = support::app::send_with_state(
         state,
         Request::builder()
-            .uri("/random/fields?n=20&count=20")
+            .uri(format!(
+                "/random/fields?n=20&count=20&workspace_id={DEFAULT_WORKSPACE_ID}"
+            ))
             .body(Body::empty())
             .unwrap(),
     )
@@ -780,7 +852,9 @@ async fn random_fields_route_uses_default_query_values() {
     let response = support::app::send_with_state(
         state,
         Request::builder()
-            .uri("/random/fields")
+            .uri(format!(
+                "/random/fields?workspace_id={DEFAULT_WORKSPACE_ID}"
+            ))
             .body(Body::empty())
             .unwrap(),
     )
@@ -795,10 +869,10 @@ async fn random_fields_route_uses_default_query_values() {
 #[tokio::test]
 async fn random_fields_route_rejects_invalid_query_values() {
     for uri in [
-        "/random/fields?n=0",
-        "/random/fields?n=21",
-        "/random/fields?count=0",
-        "/random/fields?count=101",
+        format!("/random/fields?n=0&workspace_id={DEFAULT_WORKSPACE_ID}"),
+        format!("/random/fields?n=21&workspace_id={DEFAULT_WORKSPACE_ID}"),
+        format!("/random/fields?count=0&workspace_id={DEFAULT_WORKSPACE_ID}"),
+        format!("/random/fields?count=101&workspace_id={DEFAULT_WORKSPACE_ID}"),
     ] {
         let response =
             support::app::send(Request::builder().uri(uri).body(Body::empty()).unwrap()).await;

@@ -9,8 +9,10 @@ use crate::dto::notes::{
     FieldNotesResponse, ListNoteRevisionsResponse, ListNoteTagsResponse, ListNotesQuery,
     ListNotesResponse, NoteResponse, NotesByDateQuery, NotesByDateResponse, RandomFieldsQuery,
     RandomNotesQuery, RandomTagsQuery, RecentNotesRequest, TaggedNotesResponse, UpdateNoteRequest,
+    WorkspaceQuery,
 };
 use crate::error::ApiError;
+use crate::repositories::workspaces::{WorkspacesRepository, workspace_not_found};
 use crate::services::notes::NotesService;
 
 /// Lists active notes.
@@ -37,8 +39,9 @@ pub async fn list_notes(
     State(state): State<crate::app::AppState>,
     Query(query): Query<ListNotesQuery>,
 ) -> Result<Json<ListNotesResponse>, ApiError> {
+    let workspace_id = active_workspace_id(&state, query.workspace_id.as_deref()).await?;
     let service = NotesService::new(state.database.pool);
-    let notes = service.list_notes(query.limit).await?;
+    let notes = service.list_notes(&workspace_id, query.limit).await?;
 
     Ok(Json(ListNotesResponse { notes }))
 }
@@ -57,6 +60,7 @@ pub async fn list_notes(
     post,
     path = "/notes/recent",
     tag = "notes",
+    params(WorkspaceQuery),
     request_body = RecentNotesRequest,
     responses(
         (status = 200, description = "Recent non-archived notes ordered by update time", body = ListNotesResponse),
@@ -67,13 +71,15 @@ pub async fn list_notes(
 )]
 pub async fn recent_notes(
     State(state): State<crate::app::AppState>,
+    Query(query): Query<WorkspaceQuery>,
     payload: Result<Json<RecentNotesRequest>, JsonRejection>,
 ) -> Result<Json<ListNotesResponse>, ApiError> {
     let Json(request) = payload.map_err(|_| ApiError::InvalidJson)?;
     request.validate().map_err(|_| ApiError::Validation)?;
 
+    let workspace_id = active_workspace_id(&state, query.workspace_id.as_deref()).await?;
     let service = NotesService::new(state.database.pool);
-    let notes = service.recent_notes(request).await?;
+    let notes = service.recent_notes(&workspace_id, request).await?;
 
     Ok(Json(ListNotesResponse { notes }))
 }
@@ -91,6 +97,7 @@ pub async fn recent_notes(
     get,
     path = "/notes/stats/daily-counts",
     tag = "notes",
+    params(WorkspaceQuery),
     responses(
         (status = 200, description = "Daily visible note counts for the past 30 days", body = DailyNoteCountsResponse),
         (status = 500, description = "Database error", body = crate::dto::error::ErrorResponse)
@@ -98,9 +105,11 @@ pub async fn recent_notes(
 )]
 pub async fn daily_note_counts(
     State(state): State<crate::app::AppState>,
+    Query(query): Query<WorkspaceQuery>,
 ) -> Result<Json<DailyNoteCountsResponse>, ApiError> {
+    let workspace_id = active_workspace_id(&state, query.workspace_id.as_deref()).await?;
     let service = NotesService::new(state.database.pool);
-    let response = service.daily_note_counts().await?;
+    let response = service.daily_note_counts(&workspace_id).await?;
 
     Ok(Json(response))
 }
@@ -130,10 +139,10 @@ pub async fn notes_by_date(
     State(state): State<crate::app::AppState>,
     Query(query): Query<NotesByDateQuery>,
 ) -> Result<Json<NotesByDateResponse>, ApiError> {
+    let workspace_id = active_workspace_id(&state, query.workspace_id.as_deref()).await?;
     query.validate().map_err(|_| ApiError::Validation)?;
-
     let service = NotesService::new(state.database.pool);
-    let response = service.notes_by_date(query).await?;
+    let response = service.notes_by_date(&workspace_id, query).await?;
 
     Ok(Json(response))
 }
@@ -163,10 +172,10 @@ pub async fn random_notes(
     State(state): State<crate::app::AppState>,
     Query(query): Query<RandomNotesQuery>,
 ) -> Result<Json<ListNotesResponse>, ApiError> {
+    let workspace_id = active_workspace_id(&state, query.workspace_id.as_deref()).await?;
     query.validate().map_err(|_| ApiError::Validation)?;
-
     let service = NotesService::new(state.database.pool);
-    let notes = service.random_notes(query).await?;
+    let notes = service.random_notes(&workspace_id, query).await?;
 
     Ok(Json(ListNotesResponse { notes }))
 }
@@ -196,10 +205,10 @@ pub async fn random_tagged_notes(
     State(state): State<crate::app::AppState>,
     Query(query): Query<RandomTagsQuery>,
 ) -> Result<Json<TaggedNotesResponse>, ApiError> {
+    let workspace_id = active_workspace_id(&state, query.workspace_id.as_deref()).await?;
     query.validate().map_err(|_| ApiError::Validation)?;
-
     let service = NotesService::new(state.database.pool);
-    let response = service.random_tagged_notes(query).await?;
+    let response = service.random_tagged_notes(&workspace_id, query).await?;
 
     Ok(Json(response))
 }
@@ -229,10 +238,10 @@ pub async fn random_field_notes(
     State(state): State<crate::app::AppState>,
     Query(query): Query<RandomFieldsQuery>,
 ) -> Result<Json<FieldNotesResponse>, ApiError> {
+    let workspace_id = active_workspace_id(&state, query.workspace_id.as_deref()).await?;
     query.validate().map_err(|_| ApiError::Validation)?;
-
     let service = NotesService::new(state.database.pool);
-    let response = service.random_field_notes(query).await?;
+    let response = service.random_field_notes(&workspace_id, query).await?;
 
     Ok(Json(response))
 }
@@ -251,6 +260,7 @@ pub async fn random_field_notes(
     post,
     path = "/notes",
     tag = "notes",
+    params(WorkspaceQuery),
     request_body = CreateNoteRequest,
     responses(
         (status = 201, description = "Note created", body = NoteResponse),
@@ -261,13 +271,15 @@ pub async fn random_field_notes(
 )]
 pub async fn create_note(
     State(state): State<crate::app::AppState>,
+    Query(query): Query<WorkspaceQuery>,
     payload: Result<Json<CreateNoteRequest>, JsonRejection>,
 ) -> Result<impl IntoResponse, ApiError> {
     let Json(request) = payload.map_err(|_| ApiError::InvalidJson)?;
     request.validate().map_err(|_| ApiError::Validation)?;
 
+    let workspace_id = active_workspace_id(&state, query.workspace_id.as_deref()).await?;
     let service = NotesService::new(state.database.pool);
-    let response = service.create_note(request).await?;
+    let response = service.create_note(&workspace_id, request).await?;
 
     Ok((StatusCode::CREATED, Json(response)))
 }
@@ -286,6 +298,7 @@ pub async fn create_note(
     post,
     path = "/notes/batch",
     tag = "notes",
+    params(WorkspaceQuery),
     request_body = BatchCreateNotesRequest,
     responses(
         (status = 201, description = "Notes created", body = BatchCreateNotesResponse),
@@ -296,13 +309,17 @@ pub async fn create_note(
 )]
 pub async fn create_notes_batch(
     State(state): State<crate::app::AppState>,
+    Query(query): Query<WorkspaceQuery>,
     payload: Result<Json<BatchCreateNotesRequest>, JsonRejection>,
 ) -> Result<impl IntoResponse, ApiError> {
     let Json(request) = payload.map_err(|_| ApiError::InvalidJson)?;
     request.validate().map_err(|_| ApiError::Validation)?;
 
+    let workspace_id = active_workspace_id(&state, query.workspace_id.as_deref()).await?;
     let service = NotesService::new(state.database.pool);
-    let response = service.create_notes_batch(request.items).await?;
+    let response = service
+        .create_notes_batch(&workspace_id, request.items)
+        .await?;
 
     Ok((StatusCode::CREATED, Json(response)))
 }
@@ -322,6 +339,7 @@ pub async fn create_notes_batch(
     path = "/notes/{note_ref}",
     tag = "notes",
     params(
+        WorkspaceQuery,
         ("note_ref" = String, Path, description = "Full 32-character note ID or at least 4-character hex prefix")
     ),
     responses(
@@ -335,9 +353,11 @@ pub async fn create_notes_batch(
 pub async fn get_note(
     State(state): State<crate::app::AppState>,
     Path(note_ref): Path<String>,
+    Query(query): Query<WorkspaceQuery>,
 ) -> Result<impl IntoResponse, ApiError> {
+    let workspace_id = active_workspace_id(&state, query.workspace_id.as_deref()).await?;
     let service = NotesService::new(state.database.pool);
-    let note = service.get_note(&note_ref).await?;
+    let note = service.get_note(&workspace_id, &note_ref).await?;
 
     Ok(Json(note))
 }
@@ -358,6 +378,7 @@ pub async fn get_note(
     path = "/notes/{note_ref}",
     tag = "notes",
     params(
+        WorkspaceQuery,
         ("note_ref" = String, Path, description = "Full 32-character note ID or at least 4-character hex prefix")
     ),
     request_body = UpdateNoteRequest,
@@ -373,13 +394,17 @@ pub async fn get_note(
 pub async fn update_note(
     State(state): State<crate::app::AppState>,
     Path(note_ref): Path<String>,
+    Query(query): Query<WorkspaceQuery>,
     payload: Result<Json<UpdateNoteRequest>, JsonRejection>,
 ) -> Result<impl IntoResponse, ApiError> {
     let Json(request) = payload.map_err(|_| ApiError::InvalidJson)?;
     request.validate().map_err(|_| ApiError::Validation)?;
 
+    let workspace_id = active_workspace_id(&state, query.workspace_id.as_deref()).await?;
     let service = NotesService::new(state.database.pool);
-    let note = service.update_note(&note_ref, request).await?;
+    let note = service
+        .update_note(&workspace_id, &note_ref, request)
+        .await?;
 
     Ok(Json(note))
 }
@@ -399,6 +424,7 @@ pub async fn update_note(
     path = "/notes/{note_ref}/archive",
     tag = "notes",
     params(
+        WorkspaceQuery,
         ("note_ref" = String, Path, description = "Full 32-character note ID or at least 4-character hex prefix")
     ),
     responses(
@@ -412,9 +438,11 @@ pub async fn update_note(
 pub async fn archive_note(
     State(state): State<crate::app::AppState>,
     Path(note_ref): Path<String>,
+    Query(query): Query<WorkspaceQuery>,
 ) -> Result<impl IntoResponse, ApiError> {
+    let workspace_id = active_workspace_id(&state, query.workspace_id.as_deref()).await?;
     let service = NotesService::new(state.database.pool);
-    let note = service.archive_note(&note_ref).await?;
+    let note = service.archive_note(&workspace_id, &note_ref).await?;
 
     Ok(Json(note))
 }
@@ -434,6 +462,7 @@ pub async fn archive_note(
     path = "/notes/{note_ref}",
     tag = "notes",
     params(
+        WorkspaceQuery,
         ("note_ref" = String, Path, description = "Full 32-character note ID or at least 4-character hex prefix")
     ),
     responses(
@@ -447,9 +476,11 @@ pub async fn archive_note(
 pub async fn delete_note(
     State(state): State<crate::app::AppState>,
     Path(note_ref): Path<String>,
+    Query(query): Query<WorkspaceQuery>,
 ) -> Result<StatusCode, ApiError> {
+    let workspace_id = active_workspace_id(&state, query.workspace_id.as_deref()).await?;
     let service = NotesService::new(state.database.pool);
-    service.delete_note(&note_ref).await?;
+    service.delete_note(&workspace_id, &note_ref).await?;
 
     Ok(StatusCode::NO_CONTENT)
 }
@@ -469,6 +500,7 @@ pub async fn delete_note(
     path = "/notes/{note_ref}/revisions",
     tag = "notes",
     params(
+        WorkspaceQuery,
         ("note_ref" = String, Path, description = "Full 32-character note ID or at least 4-character hex prefix")
     ),
     responses(
@@ -482,9 +514,13 @@ pub async fn delete_note(
 pub async fn list_note_revisions(
     State(state): State<crate::app::AppState>,
     Path(note_ref): Path<String>,
+    Query(query): Query<WorkspaceQuery>,
 ) -> Result<Json<ListNoteRevisionsResponse>, ApiError> {
+    let workspace_id = active_workspace_id(&state, query.workspace_id.as_deref()).await?;
     let service = NotesService::new(state.database.pool);
-    let revisions = service.list_note_revisions(&note_ref).await?;
+    let revisions = service
+        .list_note_revisions(&workspace_id, &note_ref)
+        .await?;
 
     Ok(Json(ListNoteRevisionsResponse { revisions }))
 }
@@ -504,6 +540,7 @@ pub async fn list_note_revisions(
     path = "/notes/{note_ref}/tags",
     tag = "notes",
     params(
+        WorkspaceQuery,
         ("note_ref" = String, Path, description = "Full 32-character note ID or at least 4-character hex prefix")
     ),
     responses(
@@ -517,9 +554,11 @@ pub async fn list_note_revisions(
 pub async fn list_note_tags(
     State(state): State<crate::app::AppState>,
     Path(note_ref): Path<String>,
+    Query(query): Query<WorkspaceQuery>,
 ) -> Result<Json<ListNoteTagsResponse>, ApiError> {
+    let workspace_id = active_workspace_id(&state, query.workspace_id.as_deref()).await?;
     let service = NotesService::new(state.database.pool);
-    let tags = service.list_note_tags(&note_ref).await?;
+    let tags = service.list_note_tags(&workspace_id, &note_ref).await?;
 
     Ok(Json(ListNoteTagsResponse { tags }))
 }
@@ -539,6 +578,7 @@ pub async fn list_note_tags(
     path = "/notes/{note_ref}/tags/{tag_name}",
     tag = "notes",
     params(
+        WorkspaceQuery,
         ("note_ref" = String, Path, description = "Full 32-character note ID or at least 4-character hex prefix"),
         ("tag_name" = String, Path, description = "Tag name to associate")
     ),
@@ -553,9 +593,13 @@ pub async fn list_note_tags(
 pub async fn add_tag_to_note(
     State(state): State<crate::app::AppState>,
     Path((note_ref, tag_name)): Path<(String, String)>,
+    Query(query): Query<WorkspaceQuery>,
 ) -> Result<impl IntoResponse, ApiError> {
+    let workspace_id = active_workspace_id(&state, query.workspace_id.as_deref()).await?;
     let service = NotesService::new(state.database.pool);
-    let tag = service.add_tag_to_note(&note_ref, &tag_name).await?;
+    let tag = service
+        .add_tag_to_note(&workspace_id, &note_ref, &tag_name)
+        .await?;
 
     Ok(Json(tag))
 }
@@ -575,6 +619,7 @@ pub async fn add_tag_to_note(
     path = "/notes/{note_ref}/tags/{tag_name}",
     tag = "notes",
     params(
+        WorkspaceQuery,
         ("note_ref" = String, Path, description = "Full 32-character note ID or at least 4-character hex prefix"),
         ("tag_name" = String, Path, description = "Tag name to remove")
     ),
@@ -589,9 +634,36 @@ pub async fn add_tag_to_note(
 pub async fn remove_tag_from_note(
     State(state): State<crate::app::AppState>,
     Path((note_ref, tag_name)): Path<(String, String)>,
+    Query(query): Query<WorkspaceQuery>,
 ) -> Result<StatusCode, ApiError> {
+    let workspace_id = active_workspace_id(&state, query.workspace_id.as_deref()).await?;
     let service = NotesService::new(state.database.pool);
-    service.remove_tag_from_note(&note_ref, &tag_name).await?;
+    service
+        .remove_tag_from_note(&workspace_id, &note_ref, &tag_name)
+        .await?;
 
     Ok(StatusCode::NO_CONTENT)
+}
+
+/// Resolves and verifies the active workspace id for a notes request.
+///
+/// # Arguments
+///
+/// * `state` - Shared application state.
+/// * `workspace_id` - Optional workspace id from the query string.
+///
+/// # Returns
+///
+/// Returns the active workspace id or a not-found API error.
+async fn active_workspace_id(
+    state: &crate::app::AppState,
+    workspace_id: Option<&str>,
+) -> Result<String, ApiError> {
+    let workspace_id = workspace_id
+        .filter(|value| !value.trim().is_empty())
+        .ok_or_else(|| workspace_not_found(""))?;
+    let repository = WorkspacesRepository::new(state.database.pool.clone());
+    repository.ensure_active(workspace_id).await?;
+
+    Ok(workspace_id.to_string())
 }

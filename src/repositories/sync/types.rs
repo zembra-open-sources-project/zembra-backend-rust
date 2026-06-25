@@ -8,6 +8,8 @@ pub const DEFAULT_DEVICE_ID: &str = "local-backend";
 /// Input used to record a local synchronization change.
 #[derive(Debug, Clone)]
 pub struct SyncChangeInput {
+    /// Workspace that owns this change.
+    pub workspace_id: String,
     /// Entity type affected by this change.
     pub entity_type: &'static str,
     /// Entity identifier affected by this change.

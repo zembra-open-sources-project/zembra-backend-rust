@@ -69,7 +69,9 @@ impl TaxonomyRepository {
     #[allow(dead_code)]
     pub async fn get_or_create_field(&self, name: &str) -> Result<FieldRecord, sqlx::Error> {
         let mut transaction = self.pool.begin().await?;
-        let field = get_or_create_field_in_transaction(&mut transaction, name).await?;
+        let field =
+            get_or_create_field_in_transaction(&mut transaction, DEFAULT_WORKSPACE_ID, name)
+                .await?;
         transaction.commit().await?;
 
         Ok(field)
@@ -87,7 +89,8 @@ impl TaxonomyRepository {
     #[allow(dead_code)]
     pub async fn get_or_create_tag(&self, name: &str) -> Result<TagRecord, sqlx::Error> {
         let mut transaction = self.pool.begin().await?;
-        let tag = get_or_create_tag_in_transaction(&mut transaction, name).await?;
+        let tag =
+            get_or_create_tag_in_transaction(&mut transaction, DEFAULT_WORKSPACE_ID, name).await?;
         transaction.commit().await?;
 
         Ok(tag)
@@ -125,6 +128,7 @@ impl TaxonomyRepository {
 /// # Arguments
 ///
 /// * `transaction` - Open SQLite transaction.
+/// * `workspace_id` - Workspace identifier for the field.
 /// * `name` - Normalized field name.
 ///
 /// # Returns
@@ -132,12 +136,13 @@ impl TaxonomyRepository {
 /// Returns the persisted field record.
 pub async fn get_or_create_field_in_transaction(
     transaction: &mut Transaction<'_, Sqlite>,
+    workspace_id: &str,
     name: &str,
 ) -> Result<FieldRecord, sqlx::Error> {
     if let Some(field) = sqlx::query_as::<_, FieldRecord>(
         "SELECT id, name, created_at FROM fields WHERE workspace_id = ? AND name = ?",
     )
-    .bind(DEFAULT_WORKSPACE_ID)
+    .bind(workspace_id)
     .bind(name)
     .fetch_optional(&mut **transaction)
     .await?
@@ -150,7 +155,7 @@ pub async fn get_or_create_field_in_transaction(
         "INSERT INTO fields (id, workspace_id, name, created_at) VALUES (?, ?, ?, unixepoch())",
     )
     .bind(&id)
-    .bind(DEFAULT_WORKSPACE_ID)
+    .bind(workspace_id)
     .bind(name)
     .execute(&mut **transaction)
     .await?;
@@ -158,7 +163,7 @@ pub async fn get_or_create_field_in_transaction(
     let field = sqlx::query_as::<_, FieldRecord>(
         "SELECT id, name, created_at FROM fields WHERE workspace_id = ? AND id = ?",
     )
-    .bind(DEFAULT_WORKSPACE_ID)
+    .bind(workspace_id)
     .bind(&id)
     .fetch_one(&mut **transaction)
     .await?;
@@ -166,6 +171,7 @@ pub async fn get_or_create_field_in_transaction(
     record_sync_change_in_transaction(
         transaction,
         SyncChangeInput {
+            workspace_id: workspace_id.to_string(),
             entity_type: "field",
             entity_id: field.id.clone(),
             operation: "insert",
@@ -173,7 +179,7 @@ pub async fn get_or_create_field_in_transaction(
             new_revision_id: None,
             payload: serde_json::json!({
                 "id": field.id,
-                "workspace_id": DEFAULT_WORKSPACE_ID,
+                "workspace_id": workspace_id,
                 "name": field.name,
                 "created_at": field.created_at
             }),
@@ -189,6 +195,7 @@ pub async fn get_or_create_field_in_transaction(
 /// # Arguments
 ///
 /// * `transaction` - Open SQLite transaction.
+/// * `workspace_id` - Workspace identifier for the tag path.
 /// * `name` - Normalized tag name.
 ///
 /// # Returns
@@ -196,6 +203,7 @@ pub async fn get_or_create_field_in_transaction(
 /// Returns the persisted tag record.
 pub async fn get_or_create_tag_in_transaction(
     transaction: &mut Transaction<'_, Sqlite>,
+    workspace_id: &str,
     name: &str,
 ) -> Result<TagRecord, sqlx::Error> {
     let tag_path = TagPath::parse(name);
@@ -214,7 +222,7 @@ pub async fn get_or_create_tag_in_transaction(
         let existing = sqlx::query_as::<_, TagRecord>(
             "SELECT id, name, parent_tag_id, path, depth, created_at FROM tags WHERE workspace_id = ? AND path = ?",
         )
-        .bind(DEFAULT_WORKSPACE_ID)
+        .bind(workspace_id)
         .bind(&current_path)
         .fetch_optional(&mut **transaction)
         .await?;
@@ -228,7 +236,7 @@ pub async fn get_or_create_tag_in_transaction(
                      VALUES (?, ?, ?, ?, ?, ?, unixepoch())",
                 )
                 .bind(&id)
-                .bind(DEFAULT_WORKSPACE_ID)
+                .bind(workspace_id)
                 .bind(segment)
                 .bind(parent_tag_id.as_deref())
                 .bind(&current_path)
@@ -239,7 +247,7 @@ pub async fn get_or_create_tag_in_transaction(
                 let tag = sqlx::query_as::<_, TagRecord>(
                     "SELECT id, name, parent_tag_id, path, depth, created_at FROM tags WHERE workspace_id = ? AND id = ?",
                 )
-                .bind(DEFAULT_WORKSPACE_ID)
+                .bind(workspace_id)
                 .bind(&id)
                 .fetch_one(&mut **transaction)
                 .await?;
@@ -247,6 +255,7 @@ pub async fn get_or_create_tag_in_transaction(
                 record_sync_change_in_transaction(
                     transaction,
                     SyncChangeInput {
+                        workspace_id: workspace_id.to_string(),
                         entity_type: "tag",
                         entity_id: tag.id.clone(),
                         operation: "insert",
@@ -254,7 +263,7 @@ pub async fn get_or_create_tag_in_transaction(
                         new_revision_id: None,
                         payload: serde_json::json!({
                             "id": tag.id,
-                            "workspace_id": DEFAULT_WORKSPACE_ID,
+                            "workspace_id": workspace_id,
                             "name": segment,
                             "parent_tag_id": parent_tag_id.as_deref(),
                             "path": tag.path,

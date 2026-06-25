@@ -77,12 +77,18 @@ fn input_with_role(content: &str, role: &str) -> CreateNoteInput {
 async fn create_note_writes_revision_field_and_tags() {
     let repository = notes_repository().await;
 
-    let created = repository.create_note(input("hello")).await.unwrap();
-    let revisions = repository
-        .list_note_revisions(&created.note.id)
+    let created = repository
+        .create_note(DEFAULT_WORKSPACE_ID, input("hello"))
         .await
         .unwrap();
-    let tags = repository.list_note_tags(&created.note.id).await.unwrap();
+    let revisions = repository
+        .list_note_revisions(DEFAULT_WORKSPACE_ID, &created.note.id)
+        .await
+        .unwrap();
+    let tags = repository
+        .list_note_tags(DEFAULT_WORKSPACE_ID, &created.note.id)
+        .await
+        .unwrap();
 
     assert_eq!(created.note.content, "hello");
     assert_eq!(created.note.role, "Human");
@@ -100,7 +106,10 @@ async fn create_note_writes_revision_field_and_tags() {
 async fn create_note_records_sync_changes() {
     let repository = notes_repository().await;
 
-    let created = repository.create_note(input("hello sync")).await.unwrap();
+    let created = repository
+        .create_note(DEFAULT_WORKSPACE_ID, input("hello sync"))
+        .await
+        .unwrap();
     let changes = list_sync_changes(&repository.pool).await.unwrap();
 
     assert_eq!(changes.len(), 7);
@@ -150,8 +159,13 @@ async fn batch_create_rolls_back_when_one_item_fails() {
         },
     ];
 
-    let result = repository.create_notes_batch(items).await;
-    let notes = repository.list_notes(None).await.unwrap();
+    let result = repository
+        .create_notes_batch(DEFAULT_WORKSPACE_ID, items)
+        .await;
+    let notes = repository
+        .list_notes(DEFAULT_WORKSPACE_ID, None)
+        .await
+        .unwrap();
 
     assert!(matches!(result, Err(ApiError::Database(_))));
     assert!(notes.is_empty());
@@ -160,10 +174,14 @@ async fn batch_create_rolls_back_when_one_item_fails() {
 #[tokio::test]
 async fn update_note_writes_new_revision() {
     let repository = notes_repository().await;
-    let created = repository.create_note(input("old")).await.unwrap();
+    let created = repository
+        .create_note(DEFAULT_WORKSPACE_ID, input("old"))
+        .await
+        .unwrap();
 
     let updated = repository
         .update_note(
+            DEFAULT_WORKSPACE_ID,
             &created.note.id,
             UpdateNoteInput {
                 content: "new".to_string(),
@@ -176,7 +194,7 @@ async fn update_note_writes_new_revision() {
         .await
         .unwrap();
     let revisions = repository
-        .list_note_revisions(&created.note.id)
+        .list_note_revisions(DEFAULT_WORKSPACE_ID, &created.note.id)
         .await
         .unwrap();
 
@@ -189,10 +207,14 @@ async fn update_note_writes_new_revision() {
 #[tokio::test]
 async fn update_note_sets_field_and_replaces_tags() {
     let repository = notes_repository().await;
-    let created = repository.create_note(input("old")).await.unwrap();
+    let created = repository
+        .create_note(DEFAULT_WORKSPACE_ID, input("old"))
+        .await
+        .unwrap();
 
     let updated = repository
         .update_note(
+            DEFAULT_WORKSPACE_ID,
             &created.note.id,
             UpdateNoteInput {
                 content: "new".to_string(),
@@ -204,7 +226,10 @@ async fn update_note_sets_field_and_replaces_tags() {
         )
         .await
         .unwrap();
-    let tags = repository.list_note_tags(&created.note.id).await.unwrap();
+    let tags = repository
+        .list_note_tags(DEFAULT_WORKSPACE_ID, &created.note.id)
+        .await
+        .unwrap();
     let field_name = sqlx::query_scalar::<_, String>(
         "SELECT name FROM fields WHERE workspace_id = ? AND id = ?",
     )
@@ -225,11 +250,18 @@ async fn update_note_sets_field_and_replaces_tags() {
 #[tokio::test]
 async fn update_note_keeps_field_and_tags_when_absent() {
     let repository = notes_repository().await;
-    let created = repository.create_note(input("old")).await.unwrap();
-    let original_tags = repository.list_note_tags(&created.note.id).await.unwrap();
+    let created = repository
+        .create_note(DEFAULT_WORKSPACE_ID, input("old"))
+        .await
+        .unwrap();
+    let original_tags = repository
+        .list_note_tags(DEFAULT_WORKSPACE_ID, &created.note.id)
+        .await
+        .unwrap();
 
     let updated = repository
         .update_note(
+            DEFAULT_WORKSPACE_ID,
             &created.note.id,
             UpdateNoteInput {
                 content: "new".to_string(),
@@ -241,7 +273,10 @@ async fn update_note_keeps_field_and_tags_when_absent() {
         )
         .await
         .unwrap();
-    let tags = repository.list_note_tags(&created.note.id).await.unwrap();
+    let tags = repository
+        .list_note_tags(DEFAULT_WORKSPACE_ID, &created.note.id)
+        .await
+        .unwrap();
 
     assert_eq!(updated.field_id, created.note.field_id);
     assert_eq!(
@@ -256,10 +291,14 @@ async fn update_note_keeps_field_and_tags_when_absent() {
 #[tokio::test]
 async fn update_note_can_clear_all_tag_associations() {
     let repository = notes_repository().await;
-    let created = repository.create_note(input("old")).await.unwrap();
+    let created = repository
+        .create_note(DEFAULT_WORKSPACE_ID, input("old"))
+        .await
+        .unwrap();
 
     repository
         .update_note(
+            DEFAULT_WORKSPACE_ID,
             &created.note.id,
             UpdateNoteInput {
                 content: "new".to_string(),
@@ -271,7 +310,10 @@ async fn update_note_can_clear_all_tag_associations() {
         )
         .await
         .unwrap();
-    let tags = repository.list_note_tags(&created.note.id).await.unwrap();
+    let tags = repository
+        .list_note_tags(DEFAULT_WORKSPACE_ID, &created.note.id)
+        .await
+        .unwrap();
 
     assert!(tags.is_empty());
 }
@@ -279,7 +321,10 @@ async fn update_note_can_clear_all_tag_associations() {
 #[tokio::test]
 async fn create_note_writes_outgoing_links() {
     let repository = notes_repository().await;
-    let target = repository.create_note(input("target")).await.unwrap();
+    let target = repository
+        .create_note(DEFAULT_WORKSPACE_ID, input("target"))
+        .await
+        .unwrap();
     let mut source_input = input("source");
     source_input.links = vec![NoteLinkInput {
         target_note_ref: target.note.id[..8].to_string(),
@@ -287,13 +332,16 @@ async fn create_note_writes_outgoing_links() {
         position: Some(7),
     }];
 
-    let created = repository.create_note(source_input).await.unwrap();
+    let created = repository
+        .create_note(DEFAULT_WORKSPACE_ID, source_input)
+        .await
+        .unwrap();
     let outgoing = repository
-        .list_visible_outgoing_links(&created.note.id)
+        .list_visible_outgoing_links(DEFAULT_WORKSPACE_ID, &created.note.id)
         .await
         .unwrap();
     let backlinks = repository
-        .list_visible_backlinks(&target.note.id)
+        .list_visible_backlinks(DEFAULT_WORKSPACE_ID, &target.note.id)
         .await
         .unwrap();
 
@@ -309,9 +357,12 @@ async fn create_note_writes_outgoing_links() {
 #[tokio::test]
 async fn update_note_replaces_and_clears_outgoing_links() {
     let repository = notes_repository().await;
-    let first = repository.create_note(input("first target")).await.unwrap();
+    let first = repository
+        .create_note(DEFAULT_WORKSPACE_ID, input("first target"))
+        .await
+        .unwrap();
     let second = repository
-        .create_note(input("second target"))
+        .create_note(DEFAULT_WORKSPACE_ID, input("second target"))
         .await
         .unwrap();
     let mut source_input = input("source");
@@ -320,10 +371,14 @@ async fn update_note_replaces_and_clears_outgoing_links() {
         anchor_text: Some("first".to_string()),
         position: Some(1),
     }];
-    let source = repository.create_note(source_input).await.unwrap();
+    let source = repository
+        .create_note(DEFAULT_WORKSPACE_ID, source_input)
+        .await
+        .unwrap();
 
     repository
         .update_note(
+            DEFAULT_WORKSPACE_ID,
             &source.note.id,
             UpdateNoteInput {
                 content: "new".to_string(),
@@ -340,7 +395,7 @@ async fn update_note_replaces_and_clears_outgoing_links() {
         .await
         .unwrap();
     let outgoing = repository
-        .list_visible_outgoing_links(&source.note.id)
+        .list_visible_outgoing_links(DEFAULT_WORKSPACE_ID, &source.note.id)
         .await
         .unwrap();
 
@@ -349,6 +404,7 @@ async fn update_note_replaces_and_clears_outgoing_links() {
 
     repository
         .update_note(
+            DEFAULT_WORKSPACE_ID,
             &source.note.id,
             UpdateNoteInput {
                 content: "clear".to_string(),
@@ -361,7 +417,7 @@ async fn update_note_replaces_and_clears_outgoing_links() {
         .await
         .unwrap();
     let outgoing = repository
-        .list_visible_outgoing_links(&source.note.id)
+        .list_visible_outgoing_links(DEFAULT_WORKSPACE_ID, &source.note.id)
         .await
         .unwrap();
 
@@ -371,17 +427,24 @@ async fn update_note_replaces_and_clears_outgoing_links() {
 #[tokio::test]
 async fn update_note_keeps_links_when_absent() {
     let repository = notes_repository().await;
-    let target = repository.create_note(input("target")).await.unwrap();
+    let target = repository
+        .create_note(DEFAULT_WORKSPACE_ID, input("target"))
+        .await
+        .unwrap();
     let mut source_input = input("source");
     source_input.links = vec![NoteLinkInput {
         target_note_ref: target.note.id.clone(),
         anchor_text: None,
         position: None,
     }];
-    let source = repository.create_note(source_input).await.unwrap();
+    let source = repository
+        .create_note(DEFAULT_WORKSPACE_ID, source_input)
+        .await
+        .unwrap();
 
     repository
         .update_note(
+            DEFAULT_WORKSPACE_ID,
             &source.note.id,
             UpdateNoteInput {
                 content: "new".to_string(),
@@ -394,7 +457,7 @@ async fn update_note_keeps_links_when_absent() {
         .await
         .unwrap();
     let outgoing = repository
-        .list_visible_outgoing_links(&source.note.id)
+        .list_visible_outgoing_links(DEFAULT_WORKSPACE_ID, &source.note.id)
         .await
         .unwrap();
 
@@ -405,14 +468,30 @@ async fn update_note_keeps_links_when_absent() {
 #[tokio::test]
 async fn note_links_reject_hidden_and_self_targets() {
     let repository = notes_repository().await;
-    let archived = repository.create_note(input("archived")).await.unwrap();
-    repository.archive_note(&archived.note.id).await.unwrap();
-    let deleted = repository.create_note(input("deleted")).await.unwrap();
-    repository.delete_note(&deleted.note.id).await.unwrap();
-    let source = repository.create_note(input("source")).await.unwrap();
+    let archived = repository
+        .create_note(DEFAULT_WORKSPACE_ID, input("archived"))
+        .await
+        .unwrap();
+    repository
+        .archive_note(DEFAULT_WORKSPACE_ID, &archived.note.id)
+        .await
+        .unwrap();
+    let deleted = repository
+        .create_note(DEFAULT_WORKSPACE_ID, input("deleted"))
+        .await
+        .unwrap();
+    repository
+        .delete_note(DEFAULT_WORKSPACE_ID, &deleted.note.id)
+        .await
+        .unwrap();
+    let source = repository
+        .create_note(DEFAULT_WORKSPACE_ID, input("source"))
+        .await
+        .unwrap();
 
     let archived_result = repository
         .update_note(
+            DEFAULT_WORKSPACE_ID,
             &source.note.id,
             UpdateNoteInput {
                 content: "archived".to_string(),
@@ -429,6 +508,7 @@ async fn note_links_reject_hidden_and_self_targets() {
         .await;
     let deleted_result = repository
         .update_note(
+            DEFAULT_WORKSPACE_ID,
             &source.note.id,
             UpdateNoteInput {
                 content: "deleted".to_string(),
@@ -445,6 +525,7 @@ async fn note_links_reject_hidden_and_self_targets() {
         .await;
     let self_result = repository
         .update_note(
+            DEFAULT_WORKSPACE_ID,
             &source.note.id,
             UpdateNoteInput {
                 content: "self".to_string(),
@@ -468,11 +549,18 @@ async fn note_links_reject_hidden_and_self_targets() {
 #[tokio::test]
 async fn update_archive_and_delete_record_note_sync_changes() {
     let repository = notes_repository().await;
-    let created = repository.create_note(input("old")).await.unwrap();
-    let deleted_note = repository.create_note(input("delete me")).await.unwrap();
+    let created = repository
+        .create_note(DEFAULT_WORKSPACE_ID, input("old"))
+        .await
+        .unwrap();
+    let deleted_note = repository
+        .create_note(DEFAULT_WORKSPACE_ID, input("delete me"))
+        .await
+        .unwrap();
 
     repository
         .update_note(
+            DEFAULT_WORKSPACE_ID,
             &created.note.id,
             UpdateNoteInput {
                 content: "new".to_string(),
@@ -484,8 +572,14 @@ async fn update_archive_and_delete_record_note_sync_changes() {
         )
         .await
         .unwrap();
-    repository.archive_note(&created.note.id).await.unwrap();
-    repository.delete_note(&deleted_note.note.id).await.unwrap();
+    repository
+        .archive_note(DEFAULT_WORKSPACE_ID, &created.note.id)
+        .await
+        .unwrap();
+    repository
+        .delete_note(DEFAULT_WORKSPACE_ID, &deleted_note.note.id)
+        .await
+        .unwrap();
     let changes = list_sync_changes(&repository.pool).await.unwrap();
 
     assert!(
@@ -508,11 +602,22 @@ async fn update_archive_and_delete_record_note_sync_changes() {
 #[tokio::test]
 async fn delete_note_hides_record_from_default_reads() {
     let repository = notes_repository().await;
-    let created = repository.create_note(input("hidden")).await.unwrap();
+    let created = repository
+        .create_note(DEFAULT_WORKSPACE_ID, input("hidden"))
+        .await
+        .unwrap();
 
-    repository.delete_note(&created.note.id).await.unwrap();
-    let list = repository.list_notes(None).await.unwrap();
-    let get = repository.get_note_by_ref(&created.note.id).await;
+    repository
+        .delete_note(DEFAULT_WORKSPACE_ID, &created.note.id)
+        .await
+        .unwrap();
+    let list = repository
+        .list_notes(DEFAULT_WORKSPACE_ID, None)
+        .await
+        .unwrap();
+    let get = repository
+        .get_note_by_ref(DEFAULT_WORKSPACE_ID, &created.note.id)
+        .await;
 
     assert!(list.is_empty());
     assert!(matches!(get, Err(ApiError::RecordNotFound(_))));
@@ -548,14 +653,20 @@ async fn taxonomy_creates_hierarchical_tag_nodes() {
     let repository = notes_repository().await;
     let mut input = input("tagged");
     input.tags = Vec::new();
-    let created = repository.create_note(input).await.unwrap();
-
-    repository
-        .add_tag_to_note(&created.note.id, "rust/web")
+    let created = repository
+        .create_note(DEFAULT_WORKSPACE_ID, input)
         .await
         .unwrap();
 
-    let tags = repository.list_note_tags(&created.note.id).await.unwrap();
+    repository
+        .add_tag_to_note(DEFAULT_WORKSPACE_ID, &created.note.id, "rust/web")
+        .await
+        .unwrap();
+
+    let tags = repository
+        .list_note_tags(DEFAULT_WORKSPACE_ID, &created.note.id)
+        .await
+        .unwrap();
     let rows = sqlx::query_as::<_, (String, Option<String>, String, i64)>(
         "SELECT name, parent_tag_id, path, depth FROM tags WHERE workspace_id = ? ORDER BY depth ASC, path ASC",
     )
@@ -607,17 +718,23 @@ async fn taxonomy_creates_sync_changes_only_for_new_records() {
 #[tokio::test]
 async fn tag_association_is_idempotent_and_removable() {
     let repository = notes_repository().await;
-    let created = repository.create_note(input("tagged")).await.unwrap();
+    let created = repository
+        .create_note(DEFAULT_WORKSPACE_ID, input("tagged"))
+        .await
+        .unwrap();
 
     repository
-        .add_tag_to_note(&created.note.id, "rust")
+        .add_tag_to_note(DEFAULT_WORKSPACE_ID, &created.note.id, "rust")
         .await
         .unwrap();
     repository
-        .remove_tag_from_note(&created.note.id, "rust")
+        .remove_tag_from_note(DEFAULT_WORKSPACE_ID, &created.note.id, "rust")
         .await
         .unwrap();
-    let tags = repository.list_note_tags(&created.note.id).await.unwrap();
+    let tags = repository
+        .list_note_tags(DEFAULT_WORKSPACE_ID, &created.note.id)
+        .await
+        .unwrap();
 
     assert_eq!(
         tags.iter().map(|tag| tag.name.as_str()).collect::<Vec<_>>(),
@@ -637,10 +754,22 @@ async fn tag_association_is_idempotent_and_removable() {
 #[tokio::test]
 async fn list_recent_notes_orders_and_filters_hidden_records() {
     let repository = notes_repository().await;
-    let oldest = repository.create_note(input("oldest")).await.unwrap();
-    let archived = repository.create_note(input("archived")).await.unwrap();
-    let deleted = repository.create_note(input("deleted")).await.unwrap();
-    let newest = repository.create_note(input("newest")).await.unwrap();
+    let oldest = repository
+        .create_note(DEFAULT_WORKSPACE_ID, input("oldest"))
+        .await
+        .unwrap();
+    let archived = repository
+        .create_note(DEFAULT_WORKSPACE_ID, input("archived"))
+        .await
+        .unwrap();
+    let deleted = repository
+        .create_note(DEFAULT_WORKSPACE_ID, input("deleted"))
+        .await
+        .unwrap();
+    let newest = repository
+        .create_note(DEFAULT_WORKSPACE_ID, input("newest"))
+        .await
+        .unwrap();
 
     sqlx::query("UPDATE notes SET updated_at = ? WHERE id = ?")
         .bind(2_000_000_010_i64)
@@ -666,11 +795,17 @@ async fn list_recent_notes_orders_and_filters_hidden_records() {
         .execute(&repository.pool)
         .await
         .unwrap();
-    repository.archive_note(&archived.note.id).await.unwrap();
-    repository.delete_note(&deleted.note.id).await.unwrap();
+    repository
+        .archive_note(DEFAULT_WORKSPACE_ID, &archived.note.id)
+        .await
+        .unwrap();
+    repository
+        .delete_note(DEFAULT_WORKSPACE_ID, &deleted.note.id)
+        .await
+        .unwrap();
 
     let recent = repository
-        .list_recent_notes(10, None, RecentNotesRoleFilter::Both)
+        .list_recent_notes(DEFAULT_WORKSPACE_ID, 10, None, RecentNotesRoleFilter::Both)
         .await
         .unwrap();
 
@@ -686,11 +821,17 @@ async fn list_recent_notes_orders_and_filters_hidden_records() {
 #[tokio::test]
 async fn list_recent_notes_applies_limit() {
     let repository = notes_repository().await;
-    repository.create_note(input("first")).await.unwrap();
-    repository.create_note(input("second")).await.unwrap();
+    repository
+        .create_note(DEFAULT_WORKSPACE_ID, input("first"))
+        .await
+        .unwrap();
+    repository
+        .create_note(DEFAULT_WORKSPACE_ID, input("second"))
+        .await
+        .unwrap();
 
     let recent = repository
-        .list_recent_notes(1, None, RecentNotesRoleFilter::Both)
+        .list_recent_notes(DEFAULT_WORKSPACE_ID, 1, None, RecentNotesRoleFilter::Both)
         .await
         .unwrap();
 
@@ -701,15 +842,15 @@ async fn list_recent_notes_applies_limit() {
 async fn list_recent_notes_filters_by_role() {
     let repository = notes_repository().await;
     let human_old = repository
-        .create_note(input_with_role("human old", "Human"))
+        .create_note(DEFAULT_WORKSPACE_ID, input_with_role("human old", "Human"))
         .await
         .unwrap();
     let agent = repository
-        .create_note(input_with_role("agent", "Agent"))
+        .create_note(DEFAULT_WORKSPACE_ID, input_with_role("agent", "Agent"))
         .await
         .unwrap();
     let human_new = repository
-        .create_note(input_with_role("human new", "Human"))
+        .create_note(DEFAULT_WORKSPACE_ID, input_with_role("human new", "Human"))
         .await
         .unwrap();
 
@@ -733,15 +874,15 @@ async fn list_recent_notes_filters_by_role() {
         .unwrap();
 
     let humans = repository
-        .list_recent_notes(10, None, RecentNotesRoleFilter::Human)
+        .list_recent_notes(DEFAULT_WORKSPACE_ID, 10, None, RecentNotesRoleFilter::Human)
         .await
         .unwrap();
     let agents = repository
-        .list_recent_notes(10, None, RecentNotesRoleFilter::Agent)
+        .list_recent_notes(DEFAULT_WORKSPACE_ID, 10, None, RecentNotesRoleFilter::Agent)
         .await
         .unwrap();
     let both = repository
-        .list_recent_notes(10, None, RecentNotesRoleFilter::Both)
+        .list_recent_notes(DEFAULT_WORKSPACE_ID, 10, None, RecentNotesRoleFilter::Both)
         .await
         .unwrap();
 
@@ -771,19 +912,25 @@ async fn list_recent_notes_filters_by_role() {
 async fn list_recent_notes_applies_role_filter_with_limit_and_cursor() {
     let repository = notes_repository().await;
     let human_old = repository
-        .create_note(input_with_role("human old", "Human"))
+        .create_note(DEFAULT_WORKSPACE_ID, input_with_role("human old", "Human"))
         .await
         .unwrap();
     let agent_between = repository
-        .create_note(input_with_role("agent between", "Agent"))
+        .create_note(
+            DEFAULT_WORKSPACE_ID,
+            input_with_role("agent between", "Agent"),
+        )
         .await
         .unwrap();
     let human_cursor = repository
-        .create_note(input_with_role("human cursor", "Human"))
+        .create_note(
+            DEFAULT_WORKSPACE_ID,
+            input_with_role("human cursor", "Human"),
+        )
         .await
         .unwrap();
     let human_new = repository
-        .create_note(input_with_role("human new", "Human"))
+        .create_note(DEFAULT_WORKSPACE_ID, input_with_role("human new", "Human"))
         .await
         .unwrap();
 
@@ -802,7 +949,12 @@ async fn list_recent_notes_applies_role_filter_with_limit_and_cursor() {
     }
 
     let humans = repository
-        .list_recent_notes(1, Some(&human_cursor.note.id), RecentNotesRoleFilter::Human)
+        .list_recent_notes(
+            DEFAULT_WORKSPACE_ID,
+            1,
+            Some(&human_cursor.note.id),
+            RecentNotesRoleFilter::Human,
+        )
         .await
         .unwrap();
 
@@ -813,9 +965,18 @@ async fn list_recent_notes_applies_role_filter_with_limit_and_cursor() {
 #[tokio::test]
 async fn list_recent_notes_uses_full_note_uuid_cursor() {
     let repository = notes_repository().await;
-    let oldest = repository.create_note(input("oldest")).await.unwrap();
-    let cursor = repository.create_note(input("cursor")).await.unwrap();
-    let newest = repository.create_note(input("newest")).await.unwrap();
+    let oldest = repository
+        .create_note(DEFAULT_WORKSPACE_ID, input("oldest"))
+        .await
+        .unwrap();
+    let cursor = repository
+        .create_note(DEFAULT_WORKSPACE_ID, input("cursor"))
+        .await
+        .unwrap();
+    let newest = repository
+        .create_note(DEFAULT_WORKSPACE_ID, input("newest"))
+        .await
+        .unwrap();
 
     sqlx::query("UPDATE notes SET updated_at = ? WHERE id = ?")
         .bind(2_000_000_010_i64)
@@ -837,7 +998,12 @@ async fn list_recent_notes_uses_full_note_uuid_cursor() {
         .unwrap();
 
     let recent = repository
-        .list_recent_notes(10, Some(&cursor.note.id), RecentNotesRoleFilter::Both)
+        .list_recent_notes(
+            DEFAULT_WORKSPACE_ID,
+            10,
+            Some(&cursor.note.id),
+            RecentNotesRoleFilter::Both,
+        )
         .await
         .unwrap();
 
@@ -853,9 +1019,18 @@ async fn list_recent_notes_uses_full_note_uuid_cursor() {
 #[tokio::test]
 async fn list_recent_notes_uses_id_tiebreaker_for_cursor() {
     let repository = notes_repository().await;
-    let low_id = repository.create_note(input("low")).await.unwrap();
-    let cursor_id = repository.create_note(input("cursor")).await.unwrap();
-    let high_id = repository.create_note(input("high")).await.unwrap();
+    let low_id = repository
+        .create_note(DEFAULT_WORKSPACE_ID, input("low"))
+        .await
+        .unwrap();
+    let cursor_id = repository
+        .create_note(DEFAULT_WORKSPACE_ID, input("cursor"))
+        .await
+        .unwrap();
+    let high_id = repository
+        .create_note(DEFAULT_WORKSPACE_ID, input("high"))
+        .await
+        .unwrap();
 
     sqlx::query("UPDATE notes SET id = ?, updated_at = ? WHERE id = ?")
         .bind("10000000000000000000000000000000")
@@ -881,6 +1056,7 @@ async fn list_recent_notes_uses_id_tiebreaker_for_cursor() {
 
     let recent = repository
         .list_recent_notes(
+            DEFAULT_WORKSPACE_ID,
             10,
             Some("20000000000000000000000000000000"),
             RecentNotesRoleFilter::Both,
@@ -900,17 +1076,34 @@ async fn list_recent_notes_uses_id_tiebreaker_for_cursor() {
 #[tokio::test]
 async fn list_recent_notes_rejects_invalid_or_hidden_cursor() {
     let repository = notes_repository().await;
-    let archived = repository.create_note(input("archived")).await.unwrap();
-    repository.archive_note(&archived.note.id).await.unwrap();
+    let archived = repository
+        .create_note(DEFAULT_WORKSPACE_ID, input("archived"))
+        .await
+        .unwrap();
+    repository
+        .archive_note(DEFAULT_WORKSPACE_ID, &archived.note.id)
+        .await
+        .unwrap();
 
     let invalid = repository
-        .list_recent_notes(10, Some("abcd"), RecentNotesRoleFilter::Both)
+        .list_recent_notes(
+            DEFAULT_WORKSPACE_ID,
+            10,
+            Some("abcd"),
+            RecentNotesRoleFilter::Both,
+        )
         .await;
     let hidden = repository
-        .list_recent_notes(10, Some(&archived.note.id), RecentNotesRoleFilter::Both)
+        .list_recent_notes(
+            DEFAULT_WORKSPACE_ID,
+            10,
+            Some(&archived.note.id),
+            RecentNotesRoleFilter::Both,
+        )
         .await;
     let missing = repository
         .list_recent_notes(
+            DEFAULT_WORKSPACE_ID,
             10,
             Some("ffffffffffffffffffffffffffffffff"),
             RecentNotesRoleFilter::Both,
@@ -925,14 +1118,35 @@ async fn list_recent_notes_rejects_invalid_or_hidden_cursor() {
 #[tokio::test]
 async fn list_random_notes_filters_hidden_records_and_applies_limit() {
     let repository = notes_repository().await;
-    repository.create_note(input("first")).await.unwrap();
-    repository.create_note(input("second")).await.unwrap();
-    let archived = repository.create_note(input("archived")).await.unwrap();
-    let deleted = repository.create_note(input("deleted")).await.unwrap();
-    repository.archive_note(&archived.note.id).await.unwrap();
-    repository.delete_note(&deleted.note.id).await.unwrap();
+    repository
+        .create_note(DEFAULT_WORKSPACE_ID, input("first"))
+        .await
+        .unwrap();
+    repository
+        .create_note(DEFAULT_WORKSPACE_ID, input("second"))
+        .await
+        .unwrap();
+    let archived = repository
+        .create_note(DEFAULT_WORKSPACE_ID, input("archived"))
+        .await
+        .unwrap();
+    let deleted = repository
+        .create_note(DEFAULT_WORKSPACE_ID, input("deleted"))
+        .await
+        .unwrap();
+    repository
+        .archive_note(DEFAULT_WORKSPACE_ID, &archived.note.id)
+        .await
+        .unwrap();
+    repository
+        .delete_note(DEFAULT_WORKSPACE_ID, &deleted.note.id)
+        .await
+        .unwrap();
 
-    let notes = repository.list_random_notes(1).await.unwrap();
+    let notes = repository
+        .list_random_notes(DEFAULT_WORKSPACE_ID, 1)
+        .await
+        .unwrap();
 
     assert_eq!(notes.len(), 1);
     assert!(notes[0].content == "first" || notes[0].content == "second");
@@ -942,7 +1156,10 @@ async fn list_random_notes_filters_hidden_records_and_applies_limit() {
 async fn list_random_notes_returns_empty_when_none_exist() {
     let repository = notes_repository().await;
 
-    let notes = repository.list_random_notes(50).await.unwrap();
+    let notes = repository
+        .list_random_notes(DEFAULT_WORKSPACE_ID, 50)
+        .await
+        .unwrap();
 
     assert!(notes.is_empty());
 }
@@ -950,9 +1167,15 @@ async fn list_random_notes_returns_empty_when_none_exist() {
 #[tokio::test]
 async fn random_tags_returns_existing_tags_when_limit_is_larger() {
     let repository = notes_repository().await;
-    repository.create_note(input("first")).await.unwrap();
+    repository
+        .create_note(DEFAULT_WORKSPACE_ID, input("first"))
+        .await
+        .unwrap();
 
-    let tags = repository.random_tags(20).await.unwrap();
+    let tags = repository
+        .random_tags(DEFAULT_WORKSPACE_ID, 20)
+        .await
+        .unwrap();
 
     assert_eq!(tags.len(), 2);
     assert!(
@@ -964,13 +1187,28 @@ async fn random_tags_returns_existing_tags_when_limit_is_larger() {
 #[tokio::test]
 async fn list_visible_notes_by_tag_filters_hidden_records() {
     let repository = notes_repository().await;
-    let visible = repository.create_note(input("visible")).await.unwrap();
-    let archived = repository.create_note(input("archived")).await.unwrap();
-    let deleted = repository.create_note(input("deleted")).await.unwrap();
-    repository.archive_note(&archived.note.id).await.unwrap();
-    repository.delete_note(&deleted.note.id).await.unwrap();
+    let visible = repository
+        .create_note(DEFAULT_WORKSPACE_ID, input("visible"))
+        .await
+        .unwrap();
+    let archived = repository
+        .create_note(DEFAULT_WORKSPACE_ID, input("archived"))
+        .await
+        .unwrap();
+    let deleted = repository
+        .create_note(DEFAULT_WORKSPACE_ID, input("deleted"))
+        .await
+        .unwrap();
+    repository
+        .archive_note(DEFAULT_WORKSPACE_ID, &archived.note.id)
+        .await
+        .unwrap();
+    repository
+        .delete_note(DEFAULT_WORKSPACE_ID, &deleted.note.id)
+        .await
+        .unwrap();
     let tag = repository
-        .list_note_tags(&visible.note.id)
+        .list_note_tags(DEFAULT_WORKSPACE_ID, &visible.note.id)
         .await
         .unwrap()
         .into_iter()
@@ -978,7 +1216,7 @@ async fn list_visible_notes_by_tag_filters_hidden_records() {
         .unwrap();
 
     let notes = repository
-        .list_visible_notes_by_tag(&tag.id, 10)
+        .list_visible_notes_by_tag(DEFAULT_WORKSPACE_ID, &tag.id, 10)
         .await
         .unwrap();
 
@@ -994,10 +1232,16 @@ async fn list_visible_notes_by_tag_filters_hidden_records() {
 #[tokio::test]
 async fn list_visible_notes_by_tag_applies_limit() {
     let repository = notes_repository().await;
-    let first = repository.create_note(input("first")).await.unwrap();
-    repository.create_note(input("second")).await.unwrap();
+    let first = repository
+        .create_note(DEFAULT_WORKSPACE_ID, input("first"))
+        .await
+        .unwrap();
+    repository
+        .create_note(DEFAULT_WORKSPACE_ID, input("second"))
+        .await
+        .unwrap();
     let tag = repository
-        .list_note_tags(&first.note.id)
+        .list_note_tags(DEFAULT_WORKSPACE_ID, &first.note.id)
         .await
         .unwrap()
         .into_iter()
@@ -1005,7 +1249,7 @@ async fn list_visible_notes_by_tag_applies_limit() {
         .unwrap();
 
     let notes = repository
-        .list_visible_notes_by_tag(&tag.id, 1)
+        .list_visible_notes_by_tag(DEFAULT_WORKSPACE_ID, &tag.id, 1)
         .await
         .unwrap();
 
@@ -1015,9 +1259,15 @@ async fn list_visible_notes_by_tag_applies_limit() {
 #[tokio::test]
 async fn random_fields_returns_existing_fields_when_limit_is_larger() {
     let repository = notes_repository().await;
-    repository.create_note(input("first")).await.unwrap();
+    repository
+        .create_note(DEFAULT_WORKSPACE_ID, input("first"))
+        .await
+        .unwrap();
 
-    let fields = repository.random_fields(20).await.unwrap();
+    let fields = repository
+        .random_fields(DEFAULT_WORKSPACE_ID, 20)
+        .await
+        .unwrap();
 
     assert_eq!(fields.len(), 1);
     assert_eq!(fields[0].name, "work");
@@ -1026,19 +1276,34 @@ async fn random_fields_returns_existing_fields_when_limit_is_larger() {
 #[tokio::test]
 async fn list_visible_notes_by_field_filters_hidden_records_and_applies_limit() {
     let repository = notes_repository().await;
-    let visible = repository.create_note(input("visible")).await.unwrap();
-    repository
-        .create_note(input("second visible"))
+    let visible = repository
+        .create_note(DEFAULT_WORKSPACE_ID, input("visible"))
         .await
         .unwrap();
-    let archived = repository.create_note(input("archived")).await.unwrap();
-    let deleted = repository.create_note(input("deleted")).await.unwrap();
-    repository.archive_note(&archived.note.id).await.unwrap();
-    repository.delete_note(&deleted.note.id).await.unwrap();
+    repository
+        .create_note(DEFAULT_WORKSPACE_ID, input("second visible"))
+        .await
+        .unwrap();
+    let archived = repository
+        .create_note(DEFAULT_WORKSPACE_ID, input("archived"))
+        .await
+        .unwrap();
+    let deleted = repository
+        .create_note(DEFAULT_WORKSPACE_ID, input("deleted"))
+        .await
+        .unwrap();
+    repository
+        .archive_note(DEFAULT_WORKSPACE_ID, &archived.note.id)
+        .await
+        .unwrap();
+    repository
+        .delete_note(DEFAULT_WORKSPACE_ID, &deleted.note.id)
+        .await
+        .unwrap();
     let field_id = visible.note.field_id.as_deref().unwrap();
 
     let notes = repository
-        .list_visible_notes_by_field(field_id, 1)
+        .list_visible_notes_by_field(DEFAULT_WORKSPACE_ID, field_id, 1)
         .await
         .unwrap();
 

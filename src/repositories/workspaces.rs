@@ -35,6 +35,39 @@ impl WorkspacesRepository {
         Self { pool }
     }
 
+    /// Verifies that a workspace exists and can be used for CRUD requests.
+    ///
+    /// # Arguments
+    ///
+    /// * `workspace_id` - Full workspace UUID supplied by the client.
+    ///
+    /// # Returns
+    ///
+    /// Returns `Ok(())` when the workspace exists and is neither archived nor deleted.
+    pub async fn ensure_active(&self, workspace_id: &str) -> Result<(), crate::error::ApiError> {
+        if uuid::Uuid::parse_str(workspace_id).is_err() {
+            return Err(workspace_not_found(workspace_id));
+        }
+
+        let exists = sqlx::query_scalar::<_, i64>(
+            "SELECT EXISTS(
+                SELECT 1 FROM workspaces
+                WHERE id = ?
+                  AND archived_at IS NULL
+                  AND deleted_at IS NULL
+            )",
+        )
+        .bind(workspace_id)
+        .fetch_one(&self.pool)
+        .await?;
+
+        if exists == 1 {
+            Ok(())
+        } else {
+            Err(workspace_not_found(workspace_id))
+        }
+    }
+
     /// Lists workspace summaries ordered by visible note activity.
     ///
     /// # Returns
@@ -60,6 +93,21 @@ impl WorkspacesRepository {
         .fetch_all(&self.pool)
         .await
     }
+}
+
+/// Builds the public not-found error for invalid workspace request scopes.
+///
+/// # Arguments
+///
+/// * `workspace_id` - Workspace identifier supplied by the client.
+///
+/// # Returns
+///
+/// Returns an API not-found error.
+pub fn workspace_not_found(workspace_id: &str) -> crate::error::ApiError {
+    crate::error::ApiError::RecordNotFound(format!(
+        "Workspace \"{workspace_id}\" did not match any active workspace."
+    ))
 }
 
 /// Returns the display short hash for a workspace identifier.

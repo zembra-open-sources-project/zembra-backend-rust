@@ -3,6 +3,7 @@ mod support;
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use serde_json::json;
+use zembra_backend_rust::repositories::taxonomy::DEFAULT_WORKSPACE_ID;
 
 #[tokio::test]
 async fn patch_note_updates_content_field_and_tags() {
@@ -17,7 +18,9 @@ async fn patch_note_updates_content_field_and_tags() {
         state.clone(),
         Request::builder()
             .method("PATCH")
-            .uri(format!("/notes/{note_id}"))
+            .uri(format!(
+                "/notes/{note_id}?workspace_id={DEFAULT_WORKSPACE_ID}"
+            ))
             .header("content-type", "application/json")
             .body(Body::from(
                 json!({
@@ -33,7 +36,7 @@ async fn patch_note_updates_content_field_and_tags() {
     let status = response.status();
     let body = support::app::response_json(response).await;
     let tags = zembra_backend_rust::services::notes::NotesService::new(state.database.pool.clone())
-        .list_note_tags(&note_id)
+        .list_note_tags(DEFAULT_WORKSPACE_ID, &note_id)
         .await
         .unwrap();
     let field_name = sqlx::query_scalar::<_, String>(
@@ -67,7 +70,9 @@ async fn patch_note_keeps_missing_field_and_tags_unchanged() {
         state.clone(),
         Request::builder()
             .method("PATCH")
-            .uri(format!("/notes/{note_id}"))
+            .uri(format!(
+                "/notes/{note_id}?workspace_id={DEFAULT_WORKSPACE_ID}"
+            ))
             .header("content-type", "application/json")
             .body(Body::from(json!({ "content": "new" }).to_string()))
             .unwrap(),
@@ -76,7 +81,7 @@ async fn patch_note_keeps_missing_field_and_tags_unchanged() {
     let status = response.status();
     let body = support::app::response_json(response).await;
     let tags = zembra_backend_rust::services::notes::NotesService::new(state.database.pool.clone())
-        .list_note_tags(&note_id)
+        .list_note_tags(DEFAULT_WORKSPACE_ID, &note_id)
         .await
         .unwrap();
     let field_name = sqlx::query_scalar::<_, String>(
@@ -106,7 +111,9 @@ async fn patch_note_null_field_uses_inbox() {
         state.clone(),
         Request::builder()
             .method("PATCH")
-            .uri(format!("/notes/{note_id}"))
+            .uri(format!(
+                "/notes/{note_id}?workspace_id={DEFAULT_WORKSPACE_ID}"
+            ))
             .header("content-type", "application/json")
             .body(Body::from(
                 json!({
@@ -142,7 +149,9 @@ async fn patch_note_rejects_blank_field() {
         state,
         Request::builder()
             .method("PATCH")
-            .uri(format!("/notes/{note_id}"))
+            .uri(format!(
+                "/notes/{note_id}?workspace_id={DEFAULT_WORKSPACE_ID}"
+            ))
             .header("content-type", "application/json")
             .body(Body::from(
                 json!({

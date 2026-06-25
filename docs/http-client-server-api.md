@@ -59,9 +59,11 @@
 | 项目 | 说明 |
 | --- | --- |
 | Method | `POST` |
-| Path | `/notes` |
+| Path | `/notes?workspace_id={workspace_id}` |
 | 用途 | 替代当前 `zembra-cli add` 的本地写入链路 |
 | 成功状态 | `201 Created` |
+
+所有 notes CRUD 和 notes 派生查询接口都必须通过 URL query 显式传入完整 `workspace_id`。客户端应先调用 `GET /workspaces` 获取完整 workspace id，再把该值作为 `workspace_id` 传给 notes 接口。缺失、非法、不存在、已归档或已删除的 workspace 都返回 `404 record_not_found`；服务端不会自动选择默认 workspace，也不会使用 legacy fixed workspace fallback。
 
 请求：
 
@@ -125,7 +127,7 @@
 | 项目 | 说明 |
 | --- | --- |
 | Method | `POST` |
-| Path | `/notes/batch` |
+| Path | `/notes/batch?workspace_id={workspace_id}` |
 | 用途 | 为交互式输入、脚本批量导入和后续 agent 批量写入降低 HTTP 往返成本 |
 | 成功状态 | `201 Created` |
 
@@ -220,15 +222,21 @@
 
 | Method | Path | 用途 | 对应 Repository |
 | --- | --- | --- | --- |
-| `GET` | `/notes` | 按更新时间列出 notes，默认排除软删除 | `list_notes` |
-| `GET` | `/notes/{note_ref}` | 按完整 ID 或唯一前缀读取 note | `get_note_by_ref` |
-| `PATCH` | `/notes/{note_ref}` | 更新 note content 并写入 revision | `update_note_content` |
-| `POST` | `/notes/{note_ref}/archive` | 归档 note | `archive_note` |
-| `DELETE` | `/notes/{note_ref}` | 软删除 note | `delete_note` |
-| `GET` | `/notes/{note_ref}/tags` | 查询 note 关联 tags | `list_note_tags` |
-| `PUT` | `/notes/{note_ref}/tags/{tag_name}` | 给 note 添加 tag | `add_tag_to_note` |
-| `DELETE` | `/notes/{note_ref}/tags/{tag_name}` | 移除 note tag 关联 | `remove_tag_from_note` |
-| `GET` | `/notes/{note_ref}/revisions` | 查询 note revisions | `list_note_revisions` |
+| `GET` | `/notes?workspace_id={workspace_id}` | 按更新时间列出指定 workspace 下的可见 notes | `list_notes` |
+| `POST` | `/notes/recent?workspace_id={workspace_id}` | 按更新时间列出指定 workspace 下的 recent notes | `list_recent_notes` |
+| `GET` | `/notes/stats/daily-counts?workspace_id={workspace_id}` | 统计指定 workspace 下最近 30 天可见 notes 数量 | `daily_note_counts_since` |
+| `GET` | `/notes/by-date?date={date}&workspace_id={workspace_id}` | 按本地日期列出指定 workspace 下的可见 notes | `list_visible_notes_created_between` |
+| `GET` | `/random/notes?n={n}&workspace_id={workspace_id}` | 随机返回指定 workspace 下的可见 notes | `list_random_notes` |
+| `GET` | `/random/tags?n={n}&count={count}&workspace_id={workspace_id}` | 随机返回指定 workspace 下的 tag 分组 notes | `random_tags` |
+| `GET` | `/random/fields?n={n}&count={count}&workspace_id={workspace_id}` | 随机返回指定 workspace 下的 field 分组 notes | `random_fields` |
+| `GET` | `/notes/{note_ref}?workspace_id={workspace_id}` | 在指定 workspace 内按完整 ID 或唯一前缀读取 note | `get_note_by_ref` |
+| `PATCH` | `/notes/{note_ref}?workspace_id={workspace_id}` | 在指定 workspace 内更新 note content 并写入 revision | `update_note` |
+| `POST` | `/notes/{note_ref}/archive?workspace_id={workspace_id}` | 在指定 workspace 内归档 note | `archive_note` |
+| `DELETE` | `/notes/{note_ref}?workspace_id={workspace_id}` | 在指定 workspace 内软删除 note | `delete_note` |
+| `GET` | `/notes/{note_ref}/tags?workspace_id={workspace_id}` | 查询指定 workspace 内 note 关联 tags | `list_note_tags` |
+| `PUT` | `/notes/{note_ref}/tags/{tag_name}?workspace_id={workspace_id}` | 在指定 workspace 内给 note 添加 tag | `add_tag_to_note` |
+| `DELETE` | `/notes/{note_ref}/tags/{tag_name}?workspace_id={workspace_id}` | 在指定 workspace 内移除 note tag 关联 | `remove_tag_from_note` |
+| `GET` | `/notes/{note_ref}/revisions?workspace_id={workspace_id}` | 查询指定 workspace 内 note revisions | `list_note_revisions` |
 
 ## 错误响应合同
 
@@ -250,6 +258,7 @@
 | 字段校验失败 | `422` | `validation_error` |
 | note ref 少于 4 位 | `422` | `note_reference_too_short` |
 | note ref 非 hex | `422` | `invalid_note_reference` |
+| workspace 缺失、非法、不存在、已归档或已删除 | `404` | `record_not_found` |
 | note 不存在 | `404` | `record_not_found` |
 | note ref 匹配多个 note | `409` | `ambiguous_note_reference` |
 | 数据库未初始化 | `503` | `database_not_initialized` |
@@ -259,7 +268,7 @@
 
 | 编号 | 标准 |
 | --- | --- |
-| A1 | `POST /notes` 创建结果与当前 `zembra-cli add` 本地写入结果结构一致 |
+| A1 | `POST /notes?workspace_id={workspace_id}` 创建结果与当前 `zembra-cli add` 本地写入结果结构一致 |
 | A2 | 创建 note 时自动写入一条 `note_revisions`，并更新 `current_revision_id` |
 | A3 | field/tag 不存在时自动创建，重复 tag 不产生重复关联 |
 | A4 | `role` 默认值和校验规则与 CLI 当前 `parse_role_value` 输出一致 |
@@ -273,8 +282,8 @@
 推荐 server 开发 agent 第一阶段只交付：
 
 1. `GET /health`
-2. `POST /notes`
-3. `POST /notes/batch`
+2. `POST /notes?workspace_id={workspace_id}`
+3. `POST /notes/batch?workspace_id={workspace_id}`
 4. `GET /fields`
 5. `GET /tags`
 6. 统一错误响应结构

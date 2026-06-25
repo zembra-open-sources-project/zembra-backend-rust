@@ -3,6 +3,7 @@ mod support;
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use serde_json::json;
+use zembra_backend_rust::repositories::taxonomy::DEFAULT_WORKSPACE_ID;
 
 #[tokio::test]
 async fn note_routes_return_link_metadata() {
@@ -13,7 +14,7 @@ async fn note_routes_return_link_metadata() {
         state.clone(),
         Request::builder()
             .method("POST")
-            .uri("/notes")
+            .uri(format!("/notes?workspace_id={DEFAULT_WORKSPACE_ID}"))
             .header("content-type", "application/json")
             .body(Body::from(
                 json!({
@@ -48,7 +49,9 @@ async fn note_routes_return_link_metadata() {
         state.clone(),
         Request::builder()
             .method("GET")
-            .uri(format!("/notes/{target_id}"))
+            .uri(format!(
+                "/notes/{target_id}?workspace_id={DEFAULT_WORKSPACE_ID}"
+            ))
             .body(Body::empty())
             .unwrap(),
     )
@@ -65,7 +68,9 @@ async fn note_routes_return_link_metadata() {
         state,
         Request::builder()
             .method("PATCH")
-            .uri(format!("/notes/{source_id}"))
+            .uri(format!(
+                "/notes/{source_id}?workspace_id={DEFAULT_WORKSPACE_ID}"
+            ))
             .header("content-type", "application/json")
             .body(Body::from(
                 json!({

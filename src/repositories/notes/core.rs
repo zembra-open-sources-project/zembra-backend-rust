@@ -15,9 +15,7 @@ use crate::models::note::NoteRecord;
 use crate::models::note_link::NoteLinkRecord;
 use crate::models::tag::TagRecord;
 use crate::repositories::sync::{SyncChangeInput, record_sync_change_in_transaction};
-use crate::repositories::taxonomy::{
-    DEFAULT_WORKSPACE_ID, get_or_create_field_in_transaction, new_id,
-};
+use crate::repositories::taxonomy::{get_or_create_field_in_transaction, new_id};
 
 /// Repository for note data access.
 #[derive(Debug, Clone)]
@@ -49,9 +47,13 @@ impl NotesRepository {
     /// # Returns
     ///
     /// Returns the created note and resolved metadata.
-    pub async fn create_note(&self, input: CreateNoteInput) -> Result<CreatedNote, ApiError> {
+    pub async fn create_note(
+        &self,
+        workspace_id: &str,
+        input: CreateNoteInput,
+    ) -> Result<CreatedNote, ApiError> {
         let mut transaction = self.pool.begin().await?;
-        let created = create_note_in_transaction(&mut transaction, input).await?;
+        let created = create_note_in_transaction(&mut transaction, workspace_id, input).await?;
         transaction.commit().await?;
 
         Ok(created)
@@ -68,13 +70,15 @@ impl NotesRepository {
     /// Returns created notes when all inputs succeed.
     pub async fn create_notes_batch(
         &self,
+        workspace_id: &str,
         items: Vec<CreateNoteInput>,
     ) -> Result<Vec<CreatedNote>, ApiError> {
         let mut transaction = self.pool.begin().await?;
         let mut created_notes = Vec::with_capacity(items.len());
 
         for item in items {
-            created_notes.push(create_note_in_transaction(&mut transaction, item).await?);
+            created_notes
+                .push(create_note_in_transaction(&mut transaction, workspace_id, item).await?);
         }
 
         transaction.commit().await?;
@@ -90,14 +94,18 @@ impl NotesRepository {
     /// # Returns
     ///
     /// Returns active note records.
-    pub async fn list_notes(&self, limit: Option<i64>) -> Result<Vec<NoteRecord>, ApiError> {
+    pub async fn list_notes(
+        &self,
+        workspace_id: &str,
+        limit: Option<i64>,
+    ) -> Result<Vec<NoteRecord>, ApiError> {
         let limit = limit.unwrap_or(50);
 
         sqlx::query_as::<_, NoteRecord>(
             "SELECT id, content, role, field_id, created_at, updated_at, archived_at, deleted_at, current_revision_id \
              FROM notes WHERE workspace_id = ? AND deleted_at IS NULL AND archived_at IS NULL ORDER BY updated_at DESC LIMIT ?",
         )
-        .bind(DEFAULT_WORKSPACE_ID)
+        .bind(workspace_id)
         .bind(limit)
         .fetch_all(&self.pool)
         .await
@@ -116,6 +124,7 @@ impl NotesRepository {
     /// Returns non-deleted and non-archived note records.
     pub async fn list_recent_notes(
         &self,
+        workspace_id: &str,
         limit: i64,
         note_uuid: Option<&str>,
         role_filter: RecentNotesRoleFilter,
@@ -123,7 +132,7 @@ impl NotesRepository {
         match (note_uuid, role_filter.stored_role()) {
             (Some(note_uuid), Some(role)) => {
                 validate_full_note_uuid(note_uuid)?;
-                let cursor = self.get_visible_note_by_id(note_uuid).await?;
+                let cursor = self.get_visible_note_by_id(workspace_id, note_uuid).await?;
 
                 sqlx::query_as::<_, NoteRecord>(
                     "SELECT id, content, role, field_id, created_at, updated_at, archived_at, deleted_at, current_revision_id \
@@ -135,7 +144,7 @@ impl NotesRepository {
                      AND (updated_at < ? OR (updated_at = ? AND id < ?)) \
                      ORDER BY updated_at DESC, id DESC LIMIT ?",
                 )
-                .bind(DEFAULT_WORKSPACE_ID)
+                .bind(workspace_id)
                 .bind(role)
                 .bind(cursor.updated_at)
                 .bind(cursor.updated_at)
@@ -147,7 +156,7 @@ impl NotesRepository {
             }
             (Some(note_uuid), None) => {
                 validate_full_note_uuid(note_uuid)?;
-                let cursor = self.get_visible_note_by_id(note_uuid).await?;
+                let cursor = self.get_visible_note_by_id(workspace_id, note_uuid).await?;
 
                 sqlx::query_as::<_, NoteRecord>(
                     "SELECT id, content, role, field_id, created_at, updated_at, archived_at, deleted_at, current_revision_id \
@@ -158,7 +167,7 @@ impl NotesRepository {
                      AND (updated_at < ? OR (updated_at = ? AND id < ?)) \
                      ORDER BY updated_at DESC, id DESC LIMIT ?",
                 )
-                .bind(DEFAULT_WORKSPACE_ID)
+                .bind(workspace_id)
                 .bind(cursor.updated_at)
                 .bind(cursor.updated_at)
                 .bind(&cursor.id)
@@ -171,7 +180,7 @@ impl NotesRepository {
                 "SELECT id, content, role, field_id, created_at, updated_at, archived_at, deleted_at, current_revision_id \
                  FROM notes WHERE workspace_id = ? AND deleted_at IS NULL AND archived_at IS NULL AND role = ? ORDER BY updated_at DESC, id DESC LIMIT ?",
             )
-            .bind(DEFAULT_WORKSPACE_ID)
+            .bind(workspace_id)
             .bind(role)
             .bind(limit)
             .fetch_all(&self.pool)
@@ -181,7 +190,7 @@ impl NotesRepository {
                 "SELECT id, content, role, field_id, created_at, updated_at, archived_at, deleted_at, current_revision_id \
                  FROM notes WHERE workspace_id = ? AND deleted_at IS NULL AND archived_at IS NULL ORDER BY updated_at DESC, id DESC LIMIT ?",
             )
-            .bind(DEFAULT_WORKSPACE_ID)
+            .bind(workspace_id)
             .bind(limit)
             .fetch_all(&self.pool)
             .await
@@ -198,7 +207,11 @@ impl NotesRepository {
     /// # Returns
     ///
     /// Returns random non-deleted and non-archived note records.
-    pub async fn list_random_notes(&self, limit: i64) -> Result<Vec<NoteRecord>, ApiError> {
+    pub async fn list_random_notes(
+        &self,
+        workspace_id: &str,
+        limit: i64,
+    ) -> Result<Vec<NoteRecord>, ApiError> {
         sqlx::query_as::<_, NoteRecord>(
             "SELECT id, content, role, field_id, created_at, updated_at, archived_at, deleted_at, current_revision_id \
              FROM notes \
@@ -207,7 +220,7 @@ impl NotesRepository {
              AND archived_at IS NULL \
              ORDER BY RANDOM() LIMIT ?",
         )
-        .bind(DEFAULT_WORKSPACE_ID)
+        .bind(workspace_id)
         .bind(limit)
         .fetch_all(&self.pool)
         .await
@@ -225,6 +238,7 @@ impl NotesRepository {
     /// Returns note counts grouped by `YYYY-MM-DD` local date.
     pub async fn daily_note_counts_since(
         &self,
+        workspace_id: &str,
         start_timestamp: i64,
     ) -> Result<Vec<DailyNoteCountRow>, ApiError> {
         sqlx::query_as::<_, DailyNoteCountRow>(
@@ -237,7 +251,7 @@ impl NotesRepository {
              GROUP BY date \
              ORDER BY date ASC",
         )
-        .bind(DEFAULT_WORKSPACE_ID)
+        .bind(workspace_id)
         .bind(start_timestamp)
         .fetch_all(&self.pool)
         .await
@@ -256,6 +270,7 @@ impl NotesRepository {
     /// Returns non-deleted and non-archived note records created within the range.
     pub async fn list_visible_notes_created_between(
         &self,
+        workspace_id: &str,
         start_timestamp: i64,
         end_timestamp: i64,
     ) -> Result<Vec<NoteRecord>, ApiError> {
@@ -269,7 +284,7 @@ impl NotesRepository {
              AND created_at < ? \
              ORDER BY created_at DESC, id DESC",
         )
-        .bind(DEFAULT_WORKSPACE_ID)
+        .bind(workspace_id)
         .bind(start_timestamp)
         .bind(end_timestamp)
         .fetch_all(&self.pool)
@@ -286,11 +301,15 @@ impl NotesRepository {
     /// # Returns
     ///
     /// Returns randomly ordered tag records.
-    pub async fn random_tags(&self, limit: i64) -> Result<Vec<TagRecord>, ApiError> {
+    pub async fn random_tags(
+        &self,
+        workspace_id: &str,
+        limit: i64,
+    ) -> Result<Vec<TagRecord>, ApiError> {
         sqlx::query_as::<_, TagRecord>(
             "SELECT id, name, parent_tag_id, path, depth, created_at FROM tags WHERE workspace_id = ? ORDER BY RANDOM() LIMIT ?",
         )
-        .bind(DEFAULT_WORKSPACE_ID)
+        .bind(workspace_id)
         .bind(limit)
         .fetch_all(&self.pool)
         .await
@@ -309,6 +328,7 @@ impl NotesRepository {
     /// Returns non-deleted and non-archived note records for the tag.
     pub async fn list_visible_notes_by_tag(
         &self,
+        workspace_id: &str,
         tag_id: &str,
         limit: i64,
     ) -> Result<Vec<NoteRecord>, ApiError> {
@@ -322,7 +342,7 @@ impl NotesRepository {
              AND notes.archived_at IS NULL \
              ORDER BY RANDOM() LIMIT ?",
         )
-        .bind(DEFAULT_WORKSPACE_ID)
+        .bind(workspace_id)
         .bind(tag_id)
         .bind(limit)
         .fetch_all(&self.pool)
@@ -339,11 +359,15 @@ impl NotesRepository {
     /// # Returns
     ///
     /// Returns randomly ordered field records.
-    pub async fn random_fields(&self, limit: i64) -> Result<Vec<FieldRecord>, ApiError> {
+    pub async fn random_fields(
+        &self,
+        workspace_id: &str,
+        limit: i64,
+    ) -> Result<Vec<FieldRecord>, ApiError> {
         sqlx::query_as::<_, FieldRecord>(
             "SELECT id, name, created_at FROM fields WHERE workspace_id = ? ORDER BY RANDOM() LIMIT ?",
         )
-        .bind(DEFAULT_WORKSPACE_ID)
+        .bind(workspace_id)
         .bind(limit)
         .fetch_all(&self.pool)
         .await
@@ -362,6 +386,7 @@ impl NotesRepository {
     /// Returns non-deleted and non-archived note records for the field.
     pub async fn list_visible_notes_by_field(
         &self,
+        workspace_id: &str,
         field_id: &str,
         limit: i64,
     ) -> Result<Vec<NoteRecord>, ApiError> {
@@ -374,7 +399,7 @@ impl NotesRepository {
              AND archived_at IS NULL \
              ORDER BY RANDOM() LIMIT ?",
         )
-        .bind(DEFAULT_WORKSPACE_ID)
+        .bind(workspace_id)
         .bind(field_id)
         .bind(limit)
         .fetch_all(&self.pool)
@@ -391,12 +416,16 @@ impl NotesRepository {
     /// # Returns
     ///
     /// Returns the matching non-deleted and non-archived note.
-    async fn get_visible_note_by_id(&self, note_id: &str) -> Result<NoteRecord, ApiError> {
+    async fn get_visible_note_by_id(
+        &self,
+        workspace_id: &str,
+        note_id: &str,
+    ) -> Result<NoteRecord, ApiError> {
         sqlx::query_as::<_, NoteRecord>(
             "SELECT id, content, role, field_id, created_at, updated_at, archived_at, deleted_at, current_revision_id \
              FROM notes WHERE workspace_id = ? AND id = ? AND deleted_at IS NULL AND archived_at IS NULL",
         )
-        .bind(DEFAULT_WORKSPACE_ID)
+        .bind(workspace_id)
         .bind(note_id)
         .fetch_optional(&self.pool)
         .await?
@@ -416,7 +445,11 @@ impl NotesRepository {
     /// # Returns
     ///
     /// Returns the matching non-deleted and non-archived note or a note reference error.
-    pub async fn get_note_by_ref(&self, note_ref: &str) -> Result<NoteRecord, ApiError> {
+    pub async fn get_note_by_ref(
+        &self,
+        workspace_id: &str,
+        note_ref: &str,
+    ) -> Result<NoteRecord, ApiError> {
         validate_note_ref(note_ref)?;
 
         let pattern = format!("{note_ref}%");
@@ -424,7 +457,7 @@ impl NotesRepository {
             "SELECT id, content, role, field_id, created_at, updated_at, archived_at, deleted_at, current_revision_id \
              FROM notes WHERE workspace_id = ? AND id LIKE ? AND deleted_at IS NULL AND archived_at IS NULL ORDER BY id ASC LIMIT 2",
         )
-        .bind(DEFAULT_WORKSPACE_ID)
+        .bind(workspace_id)
         .bind(pattern)
         .fetch_all(&self.pool)
         .await?;
@@ -452,19 +485,23 @@ impl NotesRepository {
     /// Returns the updated note record.
     pub async fn update_note(
         &self,
+        workspace_id: &str,
         note_ref: &str,
         input: UpdateNoteInput,
     ) -> Result<NoteRecord, ApiError> {
-        let note = self.get_note_by_ref(note_ref).await?;
+        let note = self.get_note_by_ref(workspace_id, note_ref).await?;
         let mut transaction = self.pool.begin().await?;
         let revision_id = new_id();
         let field = match input.field.as_deref() {
-            Some(field) => Some(get_or_create_field_in_transaction(&mut transaction, field).await?),
+            Some(field) => Some(
+                get_or_create_field_in_transaction(&mut transaction, workspace_id, field).await?,
+            ),
             None => None,
         };
 
         insert_note_revision_in_transaction(
             &mut transaction,
+            workspace_id,
             &revision_id,
             &note.id,
             &input.content,
@@ -474,6 +511,7 @@ impl NotesRepository {
 
         update_note_row_in_transaction(
             &mut transaction,
+            workspace_id,
             NoteId::new(&note.id),
             RevisionId::new(&revision_id),
             &input,
@@ -482,16 +520,19 @@ impl NotesRepository {
         .await?;
 
         if let Some(tags) = input.tags.as_deref() {
-            replace_note_tags_in_transaction(&mut transaction, &note.id, tags).await?;
+            replace_note_tags_in_transaction(&mut transaction, workspace_id, &note.id, tags)
+                .await?;
         }
         if let Some(links) = input.links.as_deref() {
-            replace_note_links_in_transaction(&mut transaction, &note.id, links).await?;
+            replace_note_links_in_transaction(&mut transaction, workspace_id, &note.id, links)
+                .await?;
         }
 
-        let updated = select_note_by_id(&mut transaction, &note.id).await?;
+        let updated = select_note_by_id(&mut transaction, workspace_id, &note.id).await?;
         record_sync_change_in_transaction(
             &mut transaction,
             SyncChangeInput {
+                workspace_id: workspace_id.to_string(),
                 entity_type: "note_revision",
                 entity_id: revision_id.clone(),
                 operation: "insert",
@@ -499,7 +540,7 @@ impl NotesRepository {
                 new_revision_id: Some(revision_id.clone()),
                 payload: serde_json::json!({
                     "id": revision_id,
-                    "workspace_id": DEFAULT_WORKSPACE_ID,
+                    "workspace_id": workspace_id,
                     "note_id": note.id,
                     "content": input.content,
                     "title": null,
@@ -513,12 +554,13 @@ impl NotesRepository {
         record_sync_change_in_transaction(
             &mut transaction,
             SyncChangeInput {
+                workspace_id: workspace_id.to_string(),
                 entity_type: "note",
                 entity_id: updated.id.clone(),
                 operation: "update",
                 base_revision_id: None,
                 new_revision_id: updated.current_revision_id.clone(),
-                payload: note_payload(&updated),
+                payload: note_payload(workspace_id, &updated),
             },
         )
         .await?;
@@ -536,27 +578,32 @@ impl NotesRepository {
     /// # Returns
     ///
     /// Returns the archived note record.
-    pub async fn archive_note(&self, note_ref: &str) -> Result<NoteRecord, ApiError> {
-        let note = self.get_note_by_ref(note_ref).await?;
+    pub async fn archive_note(
+        &self,
+        workspace_id: &str,
+        note_ref: &str,
+    ) -> Result<NoteRecord, ApiError> {
+        let note = self.get_note_by_ref(workspace_id, note_ref).await?;
         let mut transaction = self.pool.begin().await?;
         sqlx::query(
             "UPDATE notes SET archived_at = unixepoch(), updated_at = unixepoch() WHERE workspace_id = ? AND id = ?",
         )
-        .bind(DEFAULT_WORKSPACE_ID)
+        .bind(workspace_id)
         .bind(&note.id)
         .execute(&mut *transaction)
         .await?;
 
-        let archived = select_note_by_id(&mut transaction, &note.id).await?;
+        let archived = select_note_by_id(&mut transaction, workspace_id, &note.id).await?;
         record_sync_change_in_transaction(
             &mut transaction,
             SyncChangeInput {
+                workspace_id: workspace_id.to_string(),
                 entity_type: "note",
                 entity_id: archived.id.clone(),
                 operation: "update",
                 base_revision_id: None,
                 new_revision_id: archived.current_revision_id.clone(),
-                payload: note_payload(&archived),
+                payload: note_payload(workspace_id, &archived),
             },
         )
         .await?;
@@ -574,27 +621,28 @@ impl NotesRepository {
     /// # Returns
     ///
     /// Returns `Ok(())` after the note is soft deleted.
-    pub async fn delete_note(&self, note_ref: &str) -> Result<(), ApiError> {
-        let note = self.get_note_by_ref(note_ref).await?;
+    pub async fn delete_note(&self, workspace_id: &str, note_ref: &str) -> Result<(), ApiError> {
+        let note = self.get_note_by_ref(workspace_id, note_ref).await?;
         let mut transaction = self.pool.begin().await?;
         sqlx::query(
             "UPDATE notes SET deleted_at = unixepoch(), updated_at = unixepoch() WHERE workspace_id = ? AND id = ?",
         )
-        .bind(DEFAULT_WORKSPACE_ID)
+        .bind(workspace_id)
         .bind(&note.id)
         .execute(&mut *transaction)
         .await?;
 
-        let deleted = select_note_by_id(&mut transaction, &note.id).await?;
+        let deleted = select_note_by_id(&mut transaction, workspace_id, &note.id).await?;
         record_sync_change_in_transaction(
             &mut transaction,
             SyncChangeInput {
+                workspace_id: workspace_id.to_string(),
                 entity_type: "note",
                 entity_id: deleted.id.clone(),
                 operation: "delete",
                 base_revision_id: None,
                 new_revision_id: deleted.current_revision_id.clone(),
-                payload: note_payload(&deleted),
+                payload: note_payload(workspace_id, &deleted),
             },
         )
         .await?;
@@ -614,13 +662,14 @@ impl NotesRepository {
     /// Returns the field name when the note has a field.
     pub async fn field_name_by_id(
         &self,
+        workspace_id: &str,
         field_id: Option<&str>,
     ) -> Result<Option<String>, ApiError> {
         match field_id {
             Some(field_id) => sqlx::query_scalar::<_, String>(
                 "SELECT name FROM fields WHERE workspace_id = ? AND id = ?",
             )
-            .bind(DEFAULT_WORKSPACE_ID)
+            .bind(workspace_id)
             .bind(field_id)
             .fetch_optional(&self.pool)
             .await
@@ -642,10 +691,13 @@ impl NotesRepository {
 /// Returns the created note and resolved metadata.
 async fn create_note_in_transaction(
     transaction: &mut Transaction<'_, Sqlite>,
+    workspace_id: &str,
     input: CreateNoteInput,
 ) -> Result<CreatedNote, ApiError> {
     let field = match input.field.as_deref() {
-        Some(name) => Some(get_or_create_field_in_transaction(transaction, name).await?),
+        Some(name) => {
+            Some(get_or_create_field_in_transaction(transaction, workspace_id, name).await?)
+        }
         None => None,
     };
     let note_id = new_id();
@@ -653,6 +705,7 @@ async fn create_note_in_transaction(
 
     insert_note_row_in_transaction(
         transaction,
+        workspace_id,
         NoteId::new(&note_id),
         RevisionId::new(&revision_id),
         &input,
@@ -662,6 +715,7 @@ async fn create_note_in_transaction(
 
     insert_note_revision_in_transaction(
         transaction,
+        workspace_id,
         &revision_id,
         &note_id,
         &input.content,
@@ -682,27 +736,32 @@ async fn create_note_in_transaction(
     };
     let mut resolved_tags = Vec::with_capacity(input.tags.len());
     for tag_name in input.tags {
-        let tag = attach_tag_to_note_in_transaction(transaction, &note_for_tags, &tag_name).await?;
+        let tag =
+            attach_tag_to_note_in_transaction(transaction, workspace_id, &note_for_tags, &tag_name)
+                .await?;
         resolved_tags.push(tag.path);
     }
 
-    let links = insert_note_links_in_transaction(transaction, &note_id, &input.links).await?;
-    let note = select_note_by_id(transaction, &note_id).await?;
+    let links =
+        insert_note_links_in_transaction(transaction, workspace_id, &note_id, &input.links).await?;
+    let note = select_note_by_id(transaction, workspace_id, &note_id).await?;
     record_sync_change_in_transaction(
         transaction,
         SyncChangeInput {
+            workspace_id: workspace_id.to_string(),
             entity_type: "note",
             entity_id: note.id.clone(),
             operation: "insert",
             base_revision_id: None,
             new_revision_id: note.current_revision_id.clone(),
-            payload: note_payload(&note),
+            payload: note_payload(workspace_id, &note),
         },
     )
     .await?;
     record_sync_change_in_transaction(
         transaction,
         SyncChangeInput {
+            workspace_id: workspace_id.to_string(),
             entity_type: "note_revision",
             entity_id: revision_id.clone(),
             operation: "insert",
@@ -710,7 +769,7 @@ async fn create_note_in_transaction(
             new_revision_id: Some(revision_id.clone()),
             payload: serde_json::json!({
                 "id": revision_id,
-                "workspace_id": DEFAULT_WORKSPACE_ID,
+                "workspace_id": workspace_id,
                 "note_id": note_id,
                 "content": input.content,
                 "title": null,
@@ -745,6 +804,7 @@ async fn create_note_in_transaction(
 /// Returns `Ok(())` after the note row is inserted.
 async fn insert_note_row_in_transaction(
     transaction: &mut Transaction<'_, Sqlite>,
+    workspace_id: &str,
     note_id: NoteId<'_>,
     revision_id: RevisionId<'_>,
     input: &CreateNoteInput,
@@ -756,7 +816,7 @@ async fn insert_note_row_in_transaction(
          VALUES (?, ?, ?, ?, ?, unixepoch(), unixepoch(), NULL, NULL, ?)",
     )
     .bind(note_id.as_str())
-    .bind(DEFAULT_WORKSPACE_ID)
+    .bind(workspace_id)
     .bind(&input.content)
     .bind(&input.role)
     .bind(field.map(|field| field.id.as_str()))
@@ -782,6 +842,7 @@ async fn insert_note_row_in_transaction(
 /// Returns `Ok(())` after the note row is updated.
 async fn update_note_row_in_transaction(
     transaction: &mut Transaction<'_, Sqlite>,
+    workspace_id: &str,
     note_id: NoteId<'_>,
     revision_id: RevisionId<'_>,
     input: &UpdateNoteInput,
@@ -795,7 +856,7 @@ async fn update_note_row_in_transaction(
             .bind(&input.content)
             .bind(&field.id)
             .bind(revision_id.as_str())
-            .bind(DEFAULT_WORKSPACE_ID)
+            .bind(workspace_id)
             .bind(note_id.as_str())
             .execute(&mut **transaction)
             .await?;
@@ -806,7 +867,7 @@ async fn update_note_row_in_transaction(
             )
             .bind(&input.content)
             .bind(revision_id.as_str())
-            .bind(DEFAULT_WORKSPACE_ID)
+            .bind(workspace_id)
             .bind(note_id.as_str())
             .execute(&mut **transaction)
             .await?;
@@ -828,13 +889,14 @@ async fn update_note_row_in_transaction(
 /// Returns the matching note record.
 pub(super) async fn select_note_by_id(
     transaction: &mut Transaction<'_, Sqlite>,
+    workspace_id: &str,
     note_id: &str,
 ) -> Result<NoteRecord, sqlx::Error> {
     sqlx::query_as::<_, NoteRecord>(
         "SELECT id, content, role, field_id, created_at, updated_at, archived_at, deleted_at, current_revision_id \
          FROM notes WHERE workspace_id = ? AND id = ?",
     )
-    .bind(DEFAULT_WORKSPACE_ID)
+    .bind(workspace_id)
     .bind(note_id)
     .fetch_one(&mut **transaction)
     .await
@@ -852,13 +914,14 @@ pub(super) async fn select_note_by_id(
 /// Returns the matching note link record.
 pub(super) async fn select_note_link_by_id(
     transaction: &mut Transaction<'_, Sqlite>,
+    workspace_id: &str,
     link_id: &str,
 ) -> Result<NoteLinkRecord, sqlx::Error> {
     sqlx::query_as::<_, NoteLinkRecord>(
         "SELECT id, source_note_id, target_note_id, anchor_text, position, created_at \
          FROM note_links WHERE workspace_id = ? AND id = ?",
     )
-    .bind(DEFAULT_WORKSPACE_ID)
+    .bind(workspace_id)
     .bind(link_id)
     .fetch_one(&mut **transaction)
     .await
@@ -876,6 +939,7 @@ pub(super) async fn select_note_link_by_id(
 /// Returns the matching non-deleted and non-archived note.
 pub(super) async fn resolve_visible_note_by_ref_in_transaction(
     transaction: &mut Transaction<'_, Sqlite>,
+    workspace_id: &str,
     note_ref: &str,
 ) -> Result<NoteRecord, ApiError> {
     validate_note_ref(note_ref)?;
@@ -885,7 +949,7 @@ pub(super) async fn resolve_visible_note_by_ref_in_transaction(
         "SELECT id, content, role, field_id, created_at, updated_at, archived_at, deleted_at, current_revision_id \
          FROM notes WHERE workspace_id = ? AND id LIKE ? AND deleted_at IS NULL AND archived_at IS NULL ORDER BY id ASC LIMIT 2",
     )
-    .bind(DEFAULT_WORKSPACE_ID)
+    .bind(workspace_id)
     .bind(pattern)
     .fetch_all(&mut **transaction)
     .await?;

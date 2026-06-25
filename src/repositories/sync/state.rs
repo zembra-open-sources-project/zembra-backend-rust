@@ -16,7 +16,7 @@ impl SyncRepository {
     /// Returns the persisted cursor row.
     pub async fn get_or_create_state(&self, scope: &str) -> Result<SyncStateRecord, sqlx::Error> {
         let mut transaction = self.pool.begin().await?;
-        ensure_default_device_in_transaction(&mut transaction).await?;
+        ensure_default_device_in_transaction(&mut transaction, DEFAULT_WORKSPACE_ID).await?;
         sqlx::query(
             "INSERT OR IGNORE INTO sync_state \
              (workspace_id, device_id, scope, last_change_created_at, last_change_id) \
@@ -58,7 +58,7 @@ impl SyncRepository {
         change_id: &str,
     ) -> Result<(), sqlx::Error> {
         let mut transaction = self.pool.begin().await?;
-        ensure_default_device_in_transaction(&mut transaction).await?;
+        ensure_default_device_in_transaction(&mut transaction, DEFAULT_WORKSPACE_ID).await?;
         update_state_success(&mut transaction, scope, created_at, change_id).await?;
         transaction.commit().await?;
 
