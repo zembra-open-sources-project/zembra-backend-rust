@@ -12,3 +12,4 @@ pub mod repositories;
 pub mod routes;
 pub mod services;
 pub mod sync;
+pub mod version;

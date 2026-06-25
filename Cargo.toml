@@ -3,6 +3,10 @@ name = "zembra-backend-rust"
 version = "0.1.0"
 edition = "2024"
 
+[package.metadata.zembra]
+version_policy = "semver"
+release_channel = "dev"
+
 [dependencies]
 axum = "0.8"
 chrono = { version = "0.4", default-features = false, features = ["clock"] }

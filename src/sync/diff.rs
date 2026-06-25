@@ -211,6 +211,7 @@ pub fn diff_snapshots(local: &SyncTableSnapshot, remote: &SyncTableSnapshot) -> 
 /// * `entity_type` - Sync change entity type for freshness lookup.
 /// * `local_changes` - Latest local changes by entity key.
 /// * `remote_changes` - Latest remote changes by entity key.
+#[allow(clippy::too_many_arguments)]
 fn compare_rows<T, F>(
     diff: &mut SyncSnapshotDiff,
     table: SyncTableName,

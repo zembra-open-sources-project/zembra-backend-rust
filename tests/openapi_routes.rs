@@ -82,6 +82,21 @@ async fn openapi_json_lists_runtime_api_paths() {
             .get("depth")
             .is_some()
     );
+    assert!(
+        body["components"]["schemas"]["HealthResponse"]["properties"]
+            .get("version")
+            .is_some()
+    );
+    assert!(
+        body["components"]["schemas"]["HealthResponse"]["properties"]
+            .get("version_policy")
+            .is_some()
+    );
+    assert!(
+        body["components"]["schemas"]["HealthResponse"]["properties"]
+            .get("release_channel")
+            .is_some()
+    );
 }
 
 #[tokio::test]
