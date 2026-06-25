@@ -3,8 +3,9 @@ use std::str::FromStr;
 
 use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions};
 use sqlx::{Executor, SqlitePool};
+use uuid::Uuid;
 
-use crate::repositories::taxonomy::DEFAULT_WORKSPACE_ID;
+use crate::repositories::workspaces::LEGACY_FIXED_WORKSPACE_ID;
 
 const INITIAL_SCHEMA_MIGRATION: &str =
     include_str!("../../vendor/zembra-schema/migrations/001_initial_schema.sql");
@@ -49,6 +50,9 @@ impl Database {
 
         let database = Self { pool };
         database.migrate().await?;
+        if should_migrate_legacy_workspace(database_url) {
+            database.migrate_legacy_fixed_workspace().await?;
+        }
 
         Ok(database)
     }
@@ -117,6 +121,49 @@ impl Database {
             .await
             .is_ok()
     }
+
+    /// Migrates the legacy fixed workspace identifier to a locally generated UUID.
+    ///
+    /// # Returns
+    ///
+    /// Returns `Ok(())` when the local workspace identifier no longer uses the legacy fixed ID.
+    async fn migrate_legacy_fixed_workspace(&self) -> Result<(), sqlx::Error> {
+        if !table_exists(&self.pool, "workspaces").await? {
+            return Ok(());
+        }
+
+        let exists =
+            sqlx::query_scalar::<_, i64>("SELECT EXISTS(SELECT 1 FROM workspaces WHERE id = ?)")
+                .bind(LEGACY_FIXED_WORKSPACE_ID)
+                .fetch_one(&self.pool)
+                .await?;
+
+        if exists != 1 {
+            return Ok(());
+        }
+
+        let workspace_id = Uuid::new_v4().to_string();
+        sqlx::query("UPDATE workspaces SET id = ? WHERE id = ?")
+            .bind(workspace_id)
+            .bind(LEGACY_FIXED_WORKSPACE_ID)
+            .execute(&self.pool)
+            .await?;
+
+        Ok(())
+    }
+}
+
+/// Checks whether a database URL should receive real-user workspace migration.
+///
+/// # Arguments
+///
+/// * `database_url` - SQLx-compatible SQLite connection URL.
+///
+/// # Returns
+///
+/// Returns `true` for file-backed databases and `false` for in-memory test databases.
+fn should_migrate_legacy_workspace(database_url: &str) -> bool {
+    !database_url.trim().contains(":memory:")
 }
 
 /// Creates migration metadata for databases that already contain shared tables.
@@ -182,7 +229,7 @@ where
         "INSERT OR IGNORE INTO workspaces (id, workspace_name, created_at, updated_at)
         VALUES (?, NULL, unixepoch(), unixepoch())",
     )
-    .bind(DEFAULT_WORKSPACE_ID)
+    .bind(LEGACY_FIXED_WORKSPACE_ID)
     .execute(executor)
     .await?;
 

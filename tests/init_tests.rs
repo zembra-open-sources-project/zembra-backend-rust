@@ -2,6 +2,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use zembra_backend_rust::init::{GlobalInit, GlobalInitConfig, init_global};
+use zembra_backend_rust::repositories::workspaces::LEGACY_FIXED_WORKSPACE_ID;
 
 fn test_root(name: &str) -> PathBuf {
     let path = std::env::temp_dir().join(format!("zembra-init-{}-{}", name, std::process::id()));
@@ -32,6 +33,18 @@ async fn global_init_creates_default_database_before_config_file() {
 
     let content = fs::read_to_string(config_path).expect("config should be readable");
     assert!(content.contains(&format!("path = \"{}\"", database_path.display())));
+
+    let database_url = format!("sqlite://{}", database_path.display());
+    let database = zembra_backend_rust::repositories::database::Database::connect(&database_url)
+        .await
+        .expect("database should reopen");
+    let workspace_id: String = sqlx::query_scalar("SELECT id FROM workspaces LIMIT 1")
+        .fetch_one(&database.pool)
+        .await
+        .expect("workspace should exist");
+
+    assert_ne!(workspace_id, LEGACY_FIXED_WORKSPACE_ID);
+    assert_eq!(workspace_id.len(), 36);
 }
 
 #[tokio::test]

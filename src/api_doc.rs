@@ -24,6 +24,7 @@ use utoipa::OpenApi;
         crate::handlers::notes::remove_tag_from_note,
         crate::handlers::taxonomy::list_fields,
         crate::handlers::taxonomy::list_tags,
+        crate::handlers::workspaces::list_workspaces,
         crate::handlers::sync::status,
         crate::handlers::sync::config,
         crate::handlers::sync::update_config,
@@ -64,6 +65,8 @@ use utoipa::OpenApi;
             crate::dto::sync::UpdateSyncConfigRequest,
             crate::dto::taxonomy::ListFieldsResponse,
             crate::dto::taxonomy::ListTagsResponse,
+            crate::dto::workspaces::ListWorkspacesResponse,
+            crate::dto::workspaces::WorkspaceSummary,
             crate::handlers::health::HealthResponse,
             crate::models::field::FieldRecord,
             crate::models::note_link::NoteLinkRecord,
@@ -76,7 +79,8 @@ use utoipa::OpenApi;
         (name = "health", description = "Service health and runtime readiness"),
         (name = "notes", description = "Note CRUD and note relations"),
         (name = "sync", description = "Supabase synchronization status and triggers"),
-        (name = "taxonomy", description = "Fields and tags lookup")
+        (name = "taxonomy", description = "Fields and tags lookup"),
+        (name = "workspaces", description = "Workspace metadata and summaries")
     )
 )]
 pub struct ApiDoc;

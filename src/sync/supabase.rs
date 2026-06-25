@@ -351,7 +351,6 @@ impl SupabaseClient {
             .get(format!("{}/rest/v1/sync_changes", self.base_url))
             .headers(self.headers()?)
             .query(&[
-                ("workspace_id", format!("eq.{}", crate::repositories::taxonomy::DEFAULT_WORKSPACE_ID)),
                 ("device_id", format!("neq.{}", crate::repositories::sync::DEFAULT_DEVICE_ID)),
                 ("or", format!("(created_at.gt.{created_after},and(created_at.eq.{created_after},id.gt.{change_id_after}))")),
                 ("order", "created_at.asc,id.asc".to_string()),
@@ -402,7 +401,7 @@ impl SupabaseClient {
         offset: usize,
         limit: usize,
     ) -> Result<reqwest::Request, SupabaseError> {
-        let mut request = self
+        let request = self
             .client
             .get(format!("{}/rest/v1/{table}", self.base_url))
             .headers(self.headers()?)
@@ -417,12 +416,7 @@ impl SupabaseClient {
                 ),
             );
 
-        if workspace_scoped {
-            request = request.query(&[(
-                "workspace_id",
-                format!("eq.{}", crate::repositories::taxonomy::DEFAULT_WORKSPACE_ID),
-            )]);
-        }
+        let _ = workspace_scoped;
 
         request.build().map_err(Into::into)
     }
@@ -912,7 +906,7 @@ mod tests {
         let url = request.url().as_str();
 
         assert!(url.starts_with("https://example.supabase.co/rest/v1/sync_changes?"));
-        assert!(url.contains("workspace_id=eq."));
+        assert!(!url.contains("workspace_id=eq."));
         assert!(url.contains("device_id=neq.local-backend"));
         assert!(url.contains("limit=25"));
     }
@@ -956,7 +950,7 @@ mod tests {
     }
 
     #[test]
-    fn table_fetch_request_uses_workspace_filter_order_and_range() {
+    fn table_fetch_request_uses_order_and_range_without_fixed_workspace_filter() {
         let client = SupabaseClient::new("https://example.supabase.co", "sb_secret_test-key");
         let request = client
             .build_fetch_table_request(
@@ -971,7 +965,7 @@ mod tests {
 
         assert!(url.starts_with("https://example.supabase.co/rest/v1/note_tags?"));
         assert!(url.contains("select="));
-        assert!(url.contains("workspace_id=eq."));
+        assert!(!url.contains("workspace_id=eq."));
         assert!(url.contains("order=workspace_id.asc"));
         assert_eq!(request.headers()["range-unit"], "items");
         assert_eq!(request.headers()["range"], "1000-1999");

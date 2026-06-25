@@ -47,6 +47,7 @@ pub fn build_router_with_cors(
         .merge(crate::routes::health::router())
         .merge(crate::routes::notes::router())
         .merge(crate::routes::taxonomy::router())
+        .merge(crate::routes::workspaces::router())
         .merge(crate::routes::sync::router())
         .merge(
             SwaggerUi::new("/swagger-ui")

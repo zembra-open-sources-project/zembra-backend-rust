@@ -26,6 +26,7 @@ async fn openapi_json_lists_runtime_api_paths() {
     assert!(body["paths"].get("/notes/batch").is_some());
     assert!(body["paths"].get("/fields").is_some());
     assert!(body["paths"].get("/tags").is_some());
+    assert!(body["paths"].get("/workspaces").is_some());
     assert!(body["paths"].get("/sync/status").is_some());
     assert!(body["paths"].get("/sync/config").is_some());
     assert!(body["paths"].get("/sync/config/test").is_some());
@@ -95,6 +96,11 @@ async fn openapi_json_lists_runtime_api_paths() {
     assert!(
         body["components"]["schemas"]["HealthResponse"]["properties"]
             .get("release_channel")
+            .is_some()
+    );
+    assert!(
+        body["components"]["schemas"]["WorkspaceSummary"]["properties"]
+            .get("short_hash")
             .is_some()
     );
 }

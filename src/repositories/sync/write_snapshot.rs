@@ -28,7 +28,13 @@ impl SyncRepository {
         for row in &snapshot.fields {
             upsert_field(&mut transaction, row).await?;
         }
-        for row in &snapshot.tags {
+        let mut tags = snapshot.tags.iter().collect::<Vec<_>>();
+        tags.sort_by(|left, right| {
+            left.depth
+                .cmp(&right.depth)
+                .then_with(|| left.id.cmp(&right.id))
+        });
+        for row in tags {
             upsert_tag(&mut transaction, row).await?;
         }
         for row in &snapshot.notes {

@@ -103,16 +103,7 @@ pub fn diff_snapshots(local: &SyncTableSnapshot, remote: &SyncTableSnapshot) -> 
     let local_changes = latest_changes(&local.sync_changes);
     let remote_changes = latest_changes(&remote.sync_changes);
 
-    compare_rows(
-        &mut diff,
-        SyncTableName::Workspaces,
-        &local.workspaces,
-        &remote.workspaces,
-        |row| row.id.clone(),
-        "workspace",
-        &local_changes,
-        &remote_changes,
-    );
+    compare_workspaces(&mut diff, local, remote, &local_changes, &remote_changes);
     compare_rows(
         &mut diff,
         SyncTableName::Devices,
@@ -197,6 +188,121 @@ pub fn diff_snapshots(local: &SyncTableSnapshot, remote: &SyncTableSnapshot) -> 
     sort_diffs(&mut diff.write_local);
     sort_diffs(&mut diff.write_remote);
     diff
+}
+
+/// Compares workspace rows while ignoring local-only empty initialization workspaces.
+///
+/// # Arguments
+///
+/// * `diff` - Accumulated difference result.
+/// * `local` - Local snapshot.
+/// * `remote` - Remote snapshot.
+/// * `local_changes` - Latest local changes by entity key.
+/// * `remote_changes` - Latest remote changes by entity key.
+fn compare_workspaces(
+    diff: &mut SyncSnapshotDiff,
+    local: &SyncTableSnapshot,
+    remote: &SyncTableSnapshot,
+    local_changes: &HashMap<(String, String), i64>,
+    remote_changes: &HashMap<(String, String), i64>,
+) {
+    let local_by_key = local
+        .workspaces
+        .iter()
+        .map(|row| (row.id.clone(), row))
+        .collect::<HashMap<_, _>>();
+    let remote_by_key = remote
+        .workspaces
+        .iter()
+        .map(|row| (row.id.clone(), row))
+        .collect::<HashMap<_, _>>();
+
+    for key in local_by_key.keys() {
+        if !remote_by_key.contains_key(key) && !local_workspace_is_empty(local, key) {
+            push_diff(
+                diff,
+                SyncTableName::Workspaces,
+                key,
+                SyncWriteTarget::Remote,
+            );
+        }
+    }
+
+    for key in remote_by_key.keys() {
+        let Some(local_row) = local_by_key.get(key) else {
+            push_diff(diff, SyncTableName::Workspaces, key, SyncWriteTarget::Local);
+            continue;
+        };
+        let remote_row = remote_by_key
+            .get(key)
+            .expect("remote key should be present while iterating remote workspaces");
+
+        if local_row == remote_row {
+            continue;
+        }
+
+        match newer_target("workspace", key, local_changes, remote_changes) {
+            Some(SyncWriteTarget::Remote) => push_diff(
+                diff,
+                SyncTableName::Workspaces,
+                key,
+                SyncWriteTarget::Remote,
+            ),
+            Some(SyncWriteTarget::Local) => {
+                push_diff(diff, SyncTableName::Workspaces, key, SyncWriteTarget::Local)
+            }
+            None => diff.conflicts.push(SyncDiffConflict {
+                table: SyncTableName::Workspaces,
+                key: key.clone(),
+                reason: "cannot determine newer row from sync_changes.created_at".to_string(),
+            }),
+        }
+    }
+}
+
+/// Checks whether a local workspace has no dependent synchronized rows.
+///
+/// # Arguments
+///
+/// * `snapshot` - Local synchronized table snapshot.
+/// * `workspace_id` - Workspace identifier to inspect.
+///
+/// # Returns
+///
+/// Returns `true` when the workspace has no synchronized data except its workspace row.
+fn local_workspace_is_empty(snapshot: &SyncTableSnapshot, workspace_id: &str) -> bool {
+    !snapshot
+        .devices
+        .iter()
+        .any(|row| row.workspace_id == workspace_id)
+        && !snapshot
+            .fields
+            .iter()
+            .any(|row| row.workspace_id == workspace_id)
+        && !snapshot
+            .tags
+            .iter()
+            .any(|row| row.workspace_id == workspace_id)
+        && !snapshot
+            .notes
+            .iter()
+            .any(|row| row.workspace_id == workspace_id)
+        && !snapshot
+            .note_revisions
+            .iter()
+            .any(|row| row.workspace_id == workspace_id)
+        && !snapshot
+            .note_tags
+            .iter()
+            .any(|row| row.workspace_id == workspace_id)
+        && !snapshot
+            .note_links
+            .iter()
+            .any(|row| row.workspace_id == workspace_id)
+        && !snapshot
+            .sync_changes
+            .iter()
+            .any(|row| row.workspace_id == workspace_id)
 }
 
 /// Compares one table's local and remote rows.
@@ -374,7 +480,7 @@ mod tests {
     use crate::repositories::taxonomy::DEFAULT_WORKSPACE_ID;
     use crate::sync::table_snapshot::{
         FieldSnapshotRow, NoteSnapshotRow, NoteTagSnapshotRow, SyncChangeSnapshotRow,
-        SyncTableSnapshot,
+        SyncTableSnapshot, WorkspaceSnapshotRow,
     };
 
     #[test]
@@ -451,6 +557,47 @@ mod tests {
             .collect::<Vec<_>>();
 
         assert_eq!(tables, vec![SyncTableName::Notes, SyncTableName::NoteTags]);
+    }
+
+    #[test]
+    fn diff_snapshots_does_not_push_local_only_empty_workspace() {
+        let mut local = SyncTableSnapshot::default();
+        local.workspaces.push(workspace("local-empty"));
+        let mut remote = SyncTableSnapshot::default();
+        remote.workspaces.push(workspace(DEFAULT_WORKSPACE_ID));
+
+        let diff = diff_snapshots(&local, &remote);
+
+        assert!(
+            !diff
+                .write_remote
+                .iter()
+                .any(|row| { row.table == SyncTableName::Workspaces && row.key == "local-empty" })
+        );
+        assert!(diff.write_local.iter().any(|row| {
+            row.table == SyncTableName::Workspaces && row.key == DEFAULT_WORKSPACE_ID
+        }));
+        assert!(diff.conflicts.is_empty());
+    }
+
+    /// Builds a workspace row for diff tests.
+    ///
+    /// # Arguments
+    ///
+    /// * `id` - Workspace identifier.
+    ///
+    /// # Returns
+    ///
+    /// Returns a workspace snapshot row.
+    fn workspace(id: &str) -> WorkspaceSnapshotRow {
+        WorkspaceSnapshotRow {
+            id: id.to_string(),
+            workspace_name: None,
+            created_at: 1,
+            updated_at: 1,
+            archived_at: None,
+            deleted_at: None,
+        }
     }
 
     /// Builds a field row for diff tests.
