@@ -22,6 +22,13 @@ fn init_service_args_parse_default_options() {
 }
 
 #[test]
+fn init_args_parse_global_initialization() {
+    let action = parse_cli_args(["zembra-backend", "init"]).expect("global init should parse");
+
+    assert_eq!(action, CliAction::Init);
+}
+
+#[test]
 fn init_service_args_parse_start_and_force_options() {
     let action = parse_cli_args(["zembra-backend", "init", "service", "--start", "--force"])
         .expect("init service options should parse");

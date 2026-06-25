@@ -56,16 +56,18 @@ tar -xzf zembra-backend-rust-v0.1.0-x86_64-unknown-linux-gnu.tar.gz
 cd zembra-backend-rust-v0.1.0-x86_64-unknown-linux-gnu
 ```
 
-根据内置模板生成带字段注释的用户配置文件：
+先执行全局初始化，命令会创建默认数据库并生成指向该数据库的用户配置文件：
+
+```bash
+./zembra-backend init
+```
+
+默认数据库路径是 `~/.zembra/zembra.sqlite3`。如果默认数据库和 `~/.zembra.env` 都已经存在，命令会提示并跳过初始化动作。
+
+如果只需要单独生成配置文件，可以执行：
 
 ```bash
 ./zembra-backend config init
-```
-
-如果需要覆盖已有配置，显式执行：
-
-```bash
-./zembra-backend config init --force
 ```
 
 按实际运行环境调整 `~/.zembra.env`。常用配置如下：
@@ -77,7 +79,7 @@ port = 3000
 cors_allowed_origins = []
 
 [database]
-path = "/Users/you/.local/share/zembra/zembra.db"
+path = "/Users/you/.zembra/zembra.sqlite3"
 
 [logging]
 level = "INFO"

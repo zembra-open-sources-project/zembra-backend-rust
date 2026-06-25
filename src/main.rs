@@ -1,4 +1,4 @@
-use zembra_backend_rust::{cli, config_init, error, server, service_init};
+use zembra_backend_rust::{cli, config_init, error, init, server, service_init};
 
 /// Dispatches the Zembra backend command line entry point.
 ///
@@ -11,6 +11,22 @@ use zembra_backend_rust::{cli, config_init, error, server, service_init};
 async fn main() -> Result<(), error::AppError> {
     match cli::parse_cli_args(std::env::args())? {
         cli::CliAction::Serve => server::run().await,
+        cli::CliAction::Init => {
+            let config = init::GlobalInitConfig::from_current_process()?;
+            match init::init_global(&config).await? {
+                init::GlobalInit::Initialized => {
+                    println!(
+                        "initialized database at {} and configuration at {}",
+                        config.default_database_path().display(),
+                        config.config_path().display()
+                    );
+                }
+                init::GlobalInit::Skipped => {
+                    println!("database and configuration already exist; skipping initialization");
+                }
+            }
+            Ok(())
+        }
         cli::CliAction::InitService(options) => {
             let config = service_init::ServiceInitConfig::from_current_process()?;
             let runner = service_init::SystemCommandRunner;

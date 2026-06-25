@@ -6,7 +6,7 @@
 
 本次设计在配置层阻止相对 SQLite 路径进入运行时。`Settings::load()` 反序列化配置后统一调用配置校验，`DatabaseSettings::validate()` 使用 `Path::is_absolute()` 拒绝非绝对路径并返回明确错误。`DatabaseSettings::sqlite_url()` 继续只负责把已校验路径转换为 SQLx URL，不承担路径推断或工作目录解析。
 
-`zembra-backend config init` 继续写入 `~/.zembra.env`，但数据库路径从固定字符串 `data/zembra.db` 改为基于当前用户 home 的绝对路径 `~/.local/share/zembra/zembra.db`。`config/default.toml` 保持可反序列化和可运行，但不再使用相对路径；文档示例统一展示绝对路径。
+`zembra-backend config init` 继续写入 `~/.zembra.env`，但数据库路径从固定字符串 `data/zembra.db` 改为基于当前用户 home 的绝对路径。r032 后默认路径统一为 `~/.zembra/zembra.sqlite3`。`config/default.toml` 保持可反序列化和可运行，但不再使用相对路径；文档示例统一展示绝对路径。
 
 | 位置 | 决策 |
 | --- | --- |

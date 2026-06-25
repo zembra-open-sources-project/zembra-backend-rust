@@ -53,16 +53,18 @@ cd zembra-backend-rust-v0.1.0-x86_64-unknown-linux-gnu
 | `config/default.toml` | 程序自带默认配置 |
 | `~/.zembra.env` | 你的用户配置，存在时覆盖默认配置 |
 
-第一次使用可以生成带字段注释的默认配置：
+第一次使用执行全局初始化，命令会先创建默认数据库，再生成指向该数据库的用户配置：
+
+```bash
+./zembra-backend init
+```
+
+默认数据库路径是 `~/.zembra/zembra.sqlite3`。如果默认数据库和 `~/.zembra.env` 都已经存在，命令会提示并跳过初始化动作。
+
+如果只需要单独生成配置文件，可以执行：
 
 ```bash
 ./zembra-backend config init
-```
-
-如果需要覆盖已有配置，显式执行：
-
-```bash
-./zembra-backend config init --force
 ```
 
 常用配置如下：
@@ -74,7 +76,7 @@ port = 3000
 cors_allowed_origins = []
 
 [database]
-path = "/Users/you/.local/share/zembra/zembra.db"
+path = "/Users/you/.zembra/zembra.sqlite3"
 
 [logging]
 level = "INFO"
@@ -461,7 +463,7 @@ curl -X POST http://127.0.0.1:3000/sync/pull
 
 | 内容 | 默认位置 |
 | --- | --- |
-| SQLite 数据库 | `~/.local/share/zembra/zembra.db` |
+| SQLite 数据库 | `~/.zembra/zembra.sqlite3` |
 | 日志目录 | `logs/` |
 | 用户配置 | `~/.zembra.env` |
 
@@ -518,7 +520,7 @@ http://127.0.0.1:3000/swagger-ui/
 默认在用户数据目录下的：
 
 ```text
-~/.local/share/zembra/zembra.db
+~/.zembra/zembra.sqlite3
 ```
 
 可以通过 `~/.zembra.env` 修改：

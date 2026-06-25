@@ -8,6 +8,7 @@ pub mod config_init;
 pub mod dto;
 pub mod error;
 pub mod handlers;
+pub mod init;
 pub mod logging;
 pub mod models;
 pub mod repositories;

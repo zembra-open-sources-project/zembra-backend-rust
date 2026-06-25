@@ -8,6 +8,8 @@ pub use crate::service_init::ServiceInitOptions;
 pub enum CliAction {
     /// Start the HTTP server.
     Serve,
+    /// Initialize default local database and current-user configuration.
+    Init,
     /// Initialize current-user daemon or service files.
     InitService(ServiceInitOptions),
     /// Initialize the current user's configuration file.
@@ -38,6 +40,7 @@ where
     }
 
     match remaining.as_slice() {
+        [command] if command == "init" => Ok(CliAction::Init),
         [command, subcommand, options @ ..] if command == "init" && subcommand == "service" => {
             parse_service_options(options).map(CliAction::InitService)
         }

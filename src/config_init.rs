@@ -62,6 +62,43 @@ pub fn init_user_config(
     config: &UserConfigInit,
     options: ConfigInitOptions,
 ) -> Result<PathBuf, ConfigInitError> {
+    let database_path = default_database_path(&config.home_dir);
+    init_user_config_with_options(config, &database_path, options)
+}
+
+/// Initializes the current user's `~/.zembra.env` file for a database path.
+///
+/// # Arguments
+///
+/// * `config` - User config initialization inputs.
+/// * `database_path` - SQLite database path to write into the config file.
+///
+/// # Returns
+///
+/// Returns the target config path.
+pub fn init_user_config_with_database_path(
+    config: &UserConfigInit,
+    database_path: &Path,
+) -> Result<PathBuf, ConfigInitError> {
+    init_user_config_with_options(config, database_path, ConfigInitOptions { force: false })
+}
+
+/// Initializes the current user's `~/.zembra.env` file with explicit options.
+///
+/// # Arguments
+///
+/// * `config` - User config initialization inputs.
+/// * `database_path` - SQLite database path to write into the config file.
+/// * `options` - Config initialization options.
+///
+/// # Returns
+///
+/// Returns the target config path.
+fn init_user_config_with_options(
+    config: &UserConfigInit,
+    database_path: &Path,
+    options: ConfigInitOptions,
+) -> Result<PathBuf, ConfigInitError> {
     let path = config.home_dir.join(".zembra.env");
 
     if path.exists() && !options.force {
@@ -77,7 +114,7 @@ pub fn init_user_config(
 
     fs::write(
         &path,
-        render_documented_user_config_for_home(&config.home_dir),
+        render_documented_user_config_for_database_path(database_path),
     )
     .map_err(|source| ConfigInitError::Io {
         path: path.clone(),
@@ -97,10 +134,10 @@ pub fn render_documented_user_config() -> String {
         .map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from("/tmp"));
 
-    render_documented_user_config_for_home(&home_dir)
+    render_documented_user_config_for_database_path(&default_database_path(&home_dir))
 }
 
-/// Renders the documented default user configuration for a home directory.
+/// Returns the default SQLite database path for a home directory.
 ///
 /// # Arguments
 ///
@@ -108,10 +145,21 @@ pub fn render_documented_user_config() -> String {
 ///
 /// # Returns
 ///
-/// Returns TOML configuration content with absolute local paths.
-fn render_documented_user_config_for_home(home_dir: &Path) -> String {
-    let database_path = home_dir.join(".local/share/zembra/zembra.db");
+/// Returns `~/.zembra/zembra.sqlite3`.
+fn default_database_path(home_dir: &Path) -> PathBuf {
+    home_dir.join(".zembra/zembra.sqlite3")
+}
 
+/// Renders the documented default user configuration for a database path.
+///
+/// # Arguments
+///
+/// * `database_path` - SQLite database path to write into the config file.
+///
+/// # Returns
+///
+/// Returns TOML configuration content with absolute local paths.
+fn render_documented_user_config_for_database_path(database_path: &Path) -> String {
     vec![
         "[server]".to_string(),
         "# HTTP server bind address.".to_string(),

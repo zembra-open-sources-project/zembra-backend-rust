@@ -18,7 +18,7 @@
 - 修改：`tests/config_init_tests.rs`
 
 - 功能：拒绝相对 `database.path`，并让 `config init` 生成绝对 SQLite 数据库路径。
-- 实现说明：先添加回归测试，再在 `Settings::load()` 后执行 `DatabaseSettings::validate()`；初始化模板使用 `UserConfigInit.home_dir` 拼出 `~/.local/share/zembra/zembra.db`。
+- 实现说明：先添加回归测试，再在 `Settings::load()` 后执行 `DatabaseSettings::validate()`；初始化模板使用 `UserConfigInit.home_dir` 拼出绝对数据库路径。r032 后默认路径统一为 `~/.zembra/zembra.sqlite3`。
 - 预期验证结果：`cargo test config` 通过，并覆盖相对路径拒绝和初始化模板绝对路径。
 - 完成时间：2026-06-25
 

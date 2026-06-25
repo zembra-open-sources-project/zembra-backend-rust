@@ -26,6 +26,9 @@ pub enum AppError {
     /// User configuration initialization failed.
     #[error("config initialization error: {0}")]
     ConfigInit(#[from] crate::config_init::ConfigInitError),
+    /// Global initialization failed.
+    #[error("initialization error: {0}")]
+    Init(#[from] crate::init::GlobalInitError),
 }
 
 /// HTTP API error type converted into JSON responses.
