@@ -4,6 +4,7 @@ pub mod api_doc;
 pub mod app;
 pub mod cli;
 pub mod config;
+pub mod config_init;
 pub mod dto;
 pub mod error;
 pub mod handlers;

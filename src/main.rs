@@ -1,4 +1,4 @@
-use zembra_backend_rust::{cli, error, server, service_init};
+use zembra_backend_rust::{cli, config_init, error, server, service_init};
 
 /// Dispatches the Zembra backend command line entry point.
 ///
@@ -15,6 +15,11 @@ async fn main() -> Result<(), error::AppError> {
             let config = service_init::ServiceInitConfig::from_current_process()?;
             let runner = service_init::SystemCommandRunner;
             service_init::init_service(&config, options, &runner)?;
+            Ok(())
+        }
+        cli::CliAction::InitConfig(options) => {
+            let config = config_init::UserConfigInit::from_current_process()?;
+            config_init::init_user_config(&config, options)?;
             Ok(())
         }
     }

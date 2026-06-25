@@ -23,6 +23,9 @@ pub enum AppError {
     /// Service initialization failed.
     #[error("service initialization error: {0}")]
     ServiceInit(#[from] crate::service_init::ServiceInitError),
+    /// User configuration initialization failed.
+    #[error("config initialization error: {0}")]
+    ConfigInit(#[from] crate::config_init::ConfigInitError),
 }
 
 /// HTTP API error type converted into JSON responses.

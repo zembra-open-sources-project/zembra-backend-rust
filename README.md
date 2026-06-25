@@ -53,10 +53,16 @@ cd zembra-backend-rust-v0.1.0-x86_64-unknown-linux-gnu
 | `config/default.toml` | 程序自带默认配置 |
 | `~/.zembra.env` | 你的用户配置，存在时覆盖默认配置 |
 
-第一次使用可以复制示例配置：
+第一次使用可以生成带字段注释的默认配置：
 
 ```bash
-cp .env.example ~/.zembra.env
+./zembra-backend config init
+```
+
+如果需要覆盖已有配置，显式执行：
+
+```bash
+./zembra-backend config init --force
 ```
 
 常用配置如下：

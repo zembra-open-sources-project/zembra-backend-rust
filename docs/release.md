@@ -56,10 +56,16 @@ tar -xzf zembra-backend-rust-v0.1.0-x86_64-unknown-linux-gnu.tar.gz
 cd zembra-backend-rust-v0.1.0-x86_64-unknown-linux-gnu
 ```
 
-根据 `.env.example` 准备用户配置文件：
+根据内置模板生成带字段注释的用户配置文件：
 
 ```bash
-cp .env.example ~/.zembra.env
+./zembra-backend config init
+```
+
+如果需要覆盖已有配置，显式执行：
+
+```bash
+./zembra-backend config init --force
 ```
 
 按实际运行环境调整 `~/.zembra.env`。常用配置如下：

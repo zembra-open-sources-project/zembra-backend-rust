@@ -1,5 +1,6 @@
 //! Command line parsing for the Zembra backend binary.
 
+pub use crate::config_init::ConfigInitOptions;
 pub use crate::service_init::ServiceInitOptions;
 
 /// Top-level action selected from command line arguments.
@@ -9,6 +10,8 @@ pub enum CliAction {
     Serve,
     /// Initialize current-user daemon or service files.
     InitService(ServiceInitOptions),
+    /// Initialize the current user's configuration file.
+    InitConfig(ConfigInitOptions),
 }
 
 /// Parses command line arguments into an executable action.
@@ -38,11 +41,40 @@ where
         [command, subcommand, options @ ..] if command == "init" && subcommand == "service" => {
             parse_service_options(options).map(CliAction::InitService)
         }
+        [command, subcommand, options @ ..] if command == "config" && subcommand == "init" => {
+            parse_config_options(options).map(CliAction::InitConfig)
+        }
         [command, ..] => Err(crate::error::AppError::Cli(format!(
             "unsupported command: {command}"
         ))),
         [] => Ok(CliAction::Serve),
     }
+}
+
+/// Parses `config init` options.
+///
+/// # Arguments
+///
+/// * `options` - Option strings following `config init`.
+///
+/// # Returns
+///
+/// Returns config initialization options, or an error for unknown options.
+fn parse_config_options(options: &[String]) -> Result<ConfigInitOptions, crate::error::AppError> {
+    let mut parsed = ConfigInitOptions::default();
+
+    for option in options {
+        match option.as_str() {
+            "--force" => parsed.force = true,
+            unknown => {
+                return Err(crate::error::AppError::Cli(format!(
+                    "unsupported config init option: {unknown}"
+                )));
+            }
+        }
+    }
+
+    Ok(parsed)
 }
 
 /// Parses `init service` options.
