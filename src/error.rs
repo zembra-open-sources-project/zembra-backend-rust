@@ -17,6 +17,12 @@ pub enum AppError {
     /// TCP socket binding failed.
     #[error("io error: {0}")]
     Io(#[from] std::io::Error),
+    /// Command line arguments are invalid.
+    #[error("{0}")]
+    Cli(String),
+    /// Service initialization failed.
+    #[error("service initialization error: {0}")]
+    ServiceInit(#[from] crate::service_init::ServiceInitError),
 }
 
 /// HTTP API error type converted into JSON responses.

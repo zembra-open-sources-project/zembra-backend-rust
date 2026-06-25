@@ -38,7 +38,7 @@ cd zembra-backend-rust-v0.1.0-x86_64-unknown-linux-gnu
 
 | 路径 | 用途 |
 | --- | --- |
-| `zembra-backend-rust` | 后端服务程序 |
+| `zembra-backend` | 后端服务程序 |
 | `config/default.toml` | 默认配置 |
 | `.env.example` | 用户配置示例 |
 | `supabase/migrations/` | Supabase 远端数据库 migration |
@@ -119,7 +119,7 @@ http://<后端机器 IP>:3000/health
 进入解压目录后运行：
 
 ```bash
-./zembra-backend-rust
+./zembra-backend
 ```
 
 启动时服务会自动：
@@ -136,6 +136,47 @@ http://<后端机器 IP>:3000/health
 
 ```bash
 curl http://127.0.0.1:3000/health
+```
+
+## 用户级后台服务
+
+推荐先初始化当前用户的服务运行目录和配置：
+
+```bash
+./zembra-backend init service
+```
+
+这个命令不需要 root，不创建系统用户，不写 `/etc/systemd/system`，也不会启用未登录自动启动。如果 `~/.zembra.env` 已存在，默认不会覆盖。
+
+### Ubuntu systemd user service
+
+在 Ubuntu 上可以初始化并启动当前用户的 systemd service：
+
+```bash
+./zembra-backend init service --start
+systemctl --user status zembra-backend
+```
+
+服务文件写入 `~/.config/systemd/user/zembra-backend.service`。默认数据目录是 `~/.local/share/zembra`，日志目录是 `~/.local/state/zembra/logs`。
+
+常用命令：
+
+```bash
+systemctl --user restart zembra-backend
+systemctl --user stop zembra-backend
+journalctl --user -u zembra-backend
+```
+
+本轮不启用未登录自动启动；用户未登录时服务不保证自动运行。
+
+### macOS Homebrew service
+
+在 macOS 上，`./zembra-backend init service` 只准备当前用户配置和目录，不直接调用 `brew services start`。通过 Homebrew 安装后，服务生命周期交给 Homebrew 管理：
+
+```bash
+brew services start zembra-backend
+brew services restart zembra-backend
+brew services stop zembra-backend
 ```
 
 正常响应类似：

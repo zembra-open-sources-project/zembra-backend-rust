@@ -22,7 +22,7 @@ cargo clippy --locked -- -D warnings
 
 | 路径 | 用途 |
 | --- | --- |
-| `zembra-backend-rust` | 后端服务二进制 |
+| `zembra-backend` | 后端服务二进制 |
 | `config/default.toml` | 默认配置 |
 | `.env.example` | 用户配置示例 |
 | `LICENSE` | 许可证 |
@@ -91,7 +91,7 @@ secret_key = ""
 启动服务：
 
 ```bash
-./zembra-backend-rust
+./zembra-backend
 ```
 
 健康检查：
@@ -110,6 +110,52 @@ Swagger UI：
 
 ```text
 http://127.0.0.1:3000/swagger-ui/
+```
+
+## 用户级后台服务
+
+发布包中的 `zembra-backend` 支持初始化当前用户的服务运行环境：
+
+```bash
+./zembra-backend init service
+```
+
+这个命令不需要 root，不创建系统用户，不写 `/etc/systemd/system`，不启用未登录自动启动。已有 `~/.zembra.env` 默认不会被覆盖；需要重写 CLI 生成的配置或 unit 时显式加 `--force`。
+
+### Ubuntu systemd user service
+
+Ubuntu 使用 `systemd --user`：
+
+```bash
+./zembra-backend init service --start
+systemctl --user status zembra-backend
+```
+
+初始化后会写入：
+
+| 路径 | 用途 |
+| --- | --- |
+| `~/.config/systemd/user/zembra-backend.service` | 当前用户的 systemd unit |
+| `~/.local/share/zembra` | 默认数据目录 |
+| `~/.local/state/zembra/logs` | 默认日志目录 |
+| `~/.zembra.env` | 用户配置 |
+
+常用管理命令：
+
+```bash
+systemctl --user restart zembra-backend
+systemctl --user stop zembra-backend
+journalctl --user -u zembra-backend
+```
+
+### macOS Homebrew service
+
+macOS 上 `./zembra-backend init service` 只初始化配置和目录，不直接调用 `brew services start`。通过 Homebrew 安装后，由 Homebrew 管理服务生命周期：
+
+```bash
+brew services start zembra-backend
+brew services restart zembra-backend
+brew services stop zembra-backend
 ```
 
 ## 创建新版本

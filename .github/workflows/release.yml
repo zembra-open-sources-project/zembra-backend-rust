@@ -132,7 +132,7 @@ jobs:
           package_dir="dist/${package_name}"
 
           mkdir -p "${package_dir}/config" "${package_dir}/supabase"
-          cp "target/release/zembra-backend-rust" "${package_dir}/"
+          cp "target/release/zembra-backend" "${package_dir}/"
           cp "config/default.toml" "${package_dir}/config/default.toml"
           cp ".env.example" "${package_dir}/.env.example"
           cp "LICENSE" "${package_dir}/LICENSE"
