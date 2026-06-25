@@ -66,7 +66,11 @@ fn config_init_creates_zembra_env_with_documented_defaults() {
     assert!(content.contains("# HTTP server bind address."));
     assert!(content.contains("host = \"127.0.0.1\""));
     assert!(content.contains("# SQLite database file path."));
-    assert!(content.contains("path = \"data/zembra.db\""));
+    assert!(content.contains(&format!(
+        "path = \"{}\"",
+        root.join("home").join(".local/share/zembra/zembra.db").display()
+    )));
+    assert!(!content.contains("path = \"data/zembra.db\""));
     assert!(content.contains("# Supabase secret key used only by the local backend."));
     assert!(content.contains("secret_key = \"\""));
 }

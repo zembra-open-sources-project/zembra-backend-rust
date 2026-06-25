@@ -29,7 +29,6 @@
 
 | 输入 | 输出 |
 | --- | --- |
-| `database.path = "data/zembra.db"` | `sqlite://data/zembra.db` |
 | `database.path = "/path/to/zembra.sqlite3"` | `sqlite:///path/to/zembra.sqlite3` |
 
 转换逻辑作为 `DatabaseSettings` 的方法提供，调用方不直接拼接连接字符串。

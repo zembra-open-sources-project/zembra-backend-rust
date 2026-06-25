@@ -148,22 +148,38 @@ impl Settings {
         }
 
         let settings = builder.build()?.try_deserialize::<Self>()?;
-        settings.validate_sync()?;
+        settings.validate()?;
 
         Ok(settings)
     }
 
-    /// Validates synchronization settings that depend on multiple fields.
+    /// Validates settings that depend on runtime safety rules.
     ///
     /// # Returns
     ///
-    /// Returns `Ok(())` when sync settings are internally consistent.
-    fn validate_sync(&self) -> Result<(), config::ConfigError> {
+    /// Returns `Ok(())` when all settings are internally consistent.
+    fn validate(&self) -> Result<(), config::ConfigError> {
+        self.database.validate()?;
         self.sync.validate()
     }
 }
 
 impl DatabaseSettings {
+    /// Validates whether this database configuration can run safely.
+    ///
+    /// # Returns
+    ///
+    /// Returns `Ok(())` when the SQLite database path is absolute.
+    pub fn validate(&self) -> Result<(), config::ConfigError> {
+        if Path::new(self.path.trim()).is_absolute() {
+            Ok(())
+        } else {
+            Err(config::ConfigError::Message(
+                "database.path must be an absolute SQLite database file path".to_string(),
+            ))
+        }
+    }
+
     /// Converts the configured SQLite file path into a SQLx-compatible URL.
     ///
     /// # Returns
@@ -370,7 +386,7 @@ pub fn user_config_path() -> Option<PathBuf> {
 ///
 /// # Returns
 ///
-/// Returns `sqlite://{path}` for both relative and absolute database paths.
+/// Returns `sqlite://{path}` for an absolute database path.
 fn sqlite_url_from_path(path: &str) -> String {
     format!("sqlite://{path}")
 }
@@ -421,7 +437,7 @@ mod tests {
                     port = 3010
 
                     [database]
-                    path = "data/custom-zembra.db"
+                    path = "/tmp/custom-zembra.db"
                     "#,
                     config::FileFormat::Toml,
                 )
@@ -434,7 +450,7 @@ mod tests {
 
         assert_eq!(settings.server.port, 3010);
         assert_eq!(settings.server.host, "127.0.0.1");
-        assert_eq!(settings.database.path, "data/custom-zembra.db");
+        assert_eq!(settings.database.path, "/tmp/custom-zembra.db");
         assert_eq!(settings.logging.level, "INFO");
         assert_eq!(settings.logging.path, "logs");
         assert!(!settings.sync.enabled);
@@ -454,7 +470,7 @@ mod tests {
                     port = 3010
 
                     [database]
-                    path = "data/custom-zembra.db"
+                    path = "/tmp/custom-zembra.db"
 
                     [logging]
                     level = "DEBUG"
@@ -484,7 +500,7 @@ mod tests {
                     port = 3010
 
                     [database]
-                    path = "data/custom-zembra.db"
+                    path = "/tmp/custom-zembra.db"
 
                     [sync]
                     enabled = true
@@ -607,7 +623,7 @@ mod tests {
                     port = 3010
 
                     [database]
-                    path = "data/custom-zembra.db"
+                    path = "/tmp/custom-zembra.db"
                     "#,
                     config::FileFormat::Toml,
                 )
@@ -663,12 +679,12 @@ mod tests {
     }
 
     #[test]
-    fn sqlite_url_preserves_relative_database_paths() {
+    fn database_path_rejects_relative_paths() {
         let settings = DatabaseSettings {
             path: "data/zembra.db".to_string(),
         };
 
-        assert_eq!(settings.sqlite_url(), "sqlite://data/zembra.db");
+        assert!(settings.validate().is_err());
     }
 
     #[test]

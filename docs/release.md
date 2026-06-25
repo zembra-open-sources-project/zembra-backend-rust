@@ -77,7 +77,7 @@ port = 3000
 cors_allowed_origins = []
 
 [database]
-path = "data/zembra.db"
+path = "/Users/you/.local/share/zembra/zembra.db"
 
 [logging]
 level = "INFO"
