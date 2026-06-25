@@ -356,12 +356,36 @@ impl SyncService {
 
         Err(SyncError::Conflict {
             count: conflicts.len(),
-            first: conflicts
-                .first()
-                .map(|conflict| conflict.reason.clone())
-                .unwrap_or_else(|| "unknown conflict".to_string()),
+            details: format_conflict_details(conflicts),
         })
     }
+}
+
+/// Formats unresolved synchronization conflicts for detailed logs.
+///
+/// # Arguments
+///
+/// * `conflicts` - Conflicts produced by snapshot comparison.
+///
+/// # Returns
+///
+/// Returns a single-line summary containing every conflict table, key, and reason.
+fn format_conflict_details(conflicts: &[SyncDiffConflict]) -> String {
+    if conflicts.is_empty() {
+        return "unknown conflict".to_string();
+    }
+
+    conflicts
+        .iter()
+        .enumerate()
+        .map(|(index, conflict)| {
+            format!(
+                "#{index}: table={:?}, key={}, reason={}",
+                conflict.table, conflict.key, conflict.reason
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("; ")
 }
 
 /// Direction for post-write convergence checks.
@@ -423,12 +447,12 @@ pub enum SyncError {
     #[error("{0}")]
     SchemaMigration(#[from] SchemaMigrationError),
     /// Snapshot comparison found unresolved conflicts.
-    #[error("synchronization conflict count {count}: {first}")]
+    #[error("synchronization conflict count {count}: {details}")]
     Conflict {
         /// Number of unresolved conflicts.
         count: usize,
-        /// First conflict reason.
-        first: String,
+        /// Full unresolved conflict details for logs.
+        details: String,
     },
     /// Post-write verification found remaining differences.
     #[error(

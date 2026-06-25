@@ -23,7 +23,7 @@ pub fn spawn_background_sync(service: crate::services::sync::SyncService) {
                         );
                     }
                     Err(error) => {
-                        error!(%error, "background synchronization cycle failed");
+                        error!(%error, ?error, "background synchronization cycle failed");
                     }
                 }
             } else {
