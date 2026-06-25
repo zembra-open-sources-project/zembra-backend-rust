@@ -6,9 +6,21 @@ use axum::http::{Request, StatusCode};
 #[tokio::test]
 async fn list_workspaces_returns_visible_note_summary_in_stable_order() {
     let state = support::app::test_state().await;
-    seed_workspace(&state, "aaaaaaaa-0000-4000-8000-000000000001", 10).await;
-    seed_workspace(&state, "bbbbbbbb-0000-4000-8000-000000000002", 20).await;
-    seed_workspace(&state, "cccccccc-0000-4000-8000-000000000003", 30).await;
+    seed_workspace(
+        &state,
+        "aaaaaaaa-0000-4000-8000-000000000001",
+        Some("alpha"),
+        10,
+    )
+    .await;
+    seed_workspace(
+        &state,
+        "bbbbbbbb-0000-4000-8000-000000000002",
+        Some("beta"),
+        20,
+    )
+    .await;
+    seed_workspace(&state, "cccccccc-0000-4000-8000-000000000003", None, 30).await;
     seed_note(
         &state,
         "note-a1",
@@ -72,12 +84,14 @@ async fn list_workspaces_returns_visible_note_summary_in_stable_order() {
         "aaaaaaaa-0000-4000-8000-000000000001"
     );
     assert_eq!(body["workspaces"][0]["short_hash"], "aaaaaaaa");
+    assert_eq!(body["workspaces"][0]["workspace_name"], "alpha");
     assert_eq!(body["workspaces"][0]["visible_note_count"], 2);
     assert_eq!(body["workspaces"][0]["latest_note_created_at"], 120);
     assert_eq!(
         body["workspaces"][1]["workspace_id"],
         "bbbbbbbb-0000-4000-8000-000000000002"
     );
+    assert_eq!(body["workspaces"][1]["workspace_name"], "beta");
     assert_eq!(body["workspaces"][1]["visible_note_count"], 1);
     assert_eq!(body["workspaces"][1]["latest_note_created_at"], 200);
     assert_eq!(
@@ -90,6 +104,7 @@ async fn list_workspaces_returns_visible_note_summary_in_stable_order() {
         body["workspaces"][3]["workspace_id"],
         "cccccccc-0000-4000-8000-000000000003"
     );
+    assert!(body["workspaces"][3]["workspace_name"].is_null());
     assert_eq!(body["workspaces"][3]["visible_note_count"], 0);
     assert!(body["workspaces"][3]["latest_note_created_at"].is_null());
 }
@@ -100,17 +115,20 @@ async fn list_workspaces_returns_visible_note_summary_in_stable_order() {
 ///
 /// * `state` - Application state containing the test database.
 /// * `workspace_id` - Workspace identifier to insert.
+/// * `workspace_name` - Optional workspace display name.
 /// * `created_at` - Workspace creation timestamp.
 async fn seed_workspace(
     state: &zembra_backend_rust::app::AppState,
     workspace_id: &str,
+    workspace_name: Option<&str>,
     created_at: i64,
 ) {
     sqlx::query(
         "INSERT INTO workspaces (id, workspace_name, created_at, updated_at)
-         VALUES (?, NULL, ?, ?)",
+         VALUES (?, ?, ?, ?)",
     )
     .bind(workspace_id)
+    .bind(workspace_name)
     .bind(created_at)
     .bind(created_at)
     .execute(&state.database.pool)

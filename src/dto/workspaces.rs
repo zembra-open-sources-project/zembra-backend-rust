@@ -6,6 +6,8 @@ use utoipa::ToSchema;
 pub struct WorkspaceSummary {
     /// Full workspace identifier used as the real API identity.
     pub workspace_id: String,
+    /// Human-readable workspace name, or `null` when the workspace row has no name.
+    pub workspace_name: Option<String>,
     /// Eight-character display hash derived from the workspace UUID.
     pub short_hash: String,
     /// Count of visible notes in this workspace.

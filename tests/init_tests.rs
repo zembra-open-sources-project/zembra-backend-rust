@@ -1,7 +1,9 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use zembra_backend_rust::init::{GlobalInit, GlobalInitConfig, init_global};
+use zembra_backend_rust::init::{
+    GlobalInit, GlobalInitConfig, StaticWorkspaceNameInput, init_global_with_workspace_name_input,
+};
 use zembra_backend_rust::repositories::workspaces::LEGACY_FIXED_WORKSPACE_ID;
 
 fn test_root(name: &str) -> PathBuf {
@@ -20,7 +22,8 @@ fn config(root: &Path) -> GlobalInitConfig {
 #[tokio::test]
 async fn global_init_creates_default_database_before_config_file() {
     let root = test_root("create");
-    let result = init_global(&config(&root))
+    let input = StaticWorkspaceNameInput::new(vec!["main"]);
+    let result = init_global_with_workspace_name_input(&config(&root), &input)
         .await
         .expect("global init should succeed");
 
@@ -38,13 +41,15 @@ async fn global_init_creates_default_database_before_config_file() {
     let database = zembra_backend_rust::repositories::database::Database::connect(&database_url)
         .await
         .expect("database should reopen");
-    let workspace_id: String = sqlx::query_scalar("SELECT id FROM workspaces LIMIT 1")
-        .fetch_one(&database.pool)
-        .await
-        .expect("workspace should exist");
+    let (workspace_id, workspace_name): (String, String) =
+        sqlx::query_as("SELECT id, workspace_name FROM workspaces LIMIT 1")
+            .fetch_one(&database.pool)
+            .await
+            .expect("workspace should exist");
 
     assert_ne!(workspace_id, LEGACY_FIXED_WORKSPACE_ID);
     assert_eq!(workspace_id.len(), 36);
+    assert_eq!(workspace_name, "main");
 }
 
 #[tokio::test]
@@ -58,7 +63,8 @@ async fn global_init_skips_when_database_and_config_file_exist() {
     fs::create_dir_all(config_path.parent().unwrap()).expect("config parent should exist");
     fs::write(&config_path, "existing = true\n").expect("config should exist");
 
-    let result = init_global(&config)
+    let input = StaticWorkspaceNameInput::new(vec!["unused"]);
+    let result = init_global_with_workspace_name_input(&config, &input)
         .await
         .expect("global init should succeed");
 
@@ -71,4 +77,17 @@ async fn global_init_skips_when_database_and_config_file_exist() {
         fs::read_to_string(config_path).expect("config should remain"),
         "existing = true\n"
     );
+}
+
+#[tokio::test]
+async fn global_init_rejects_three_invalid_workspace_names() {
+    let root = test_root("invalid-workspace-name");
+    let input = StaticWorkspaceNameInput::new(vec!["", "bad name", "tabs\tbad"]);
+    let error = init_global_with_workspace_name_input(&config(&root), &input)
+        .await
+        .expect_err("invalid workspace names should fail initialization");
+
+    assert!(error.to_string().contains("workspace name"));
+    assert!(!root.join("home").join(".zembra/zembra.sqlite3").exists());
+    assert!(!root.join("home").join(".zembra.env").exists());
 }

@@ -103,6 +103,11 @@ async fn openapi_json_lists_runtime_api_paths() {
             .get("short_hash")
             .is_some()
     );
+    assert!(
+        body["components"]["schemas"]["WorkspaceSummary"]["properties"]
+            .get("workspace_name")
+            .is_some()
+    );
 }
 
 #[tokio::test]

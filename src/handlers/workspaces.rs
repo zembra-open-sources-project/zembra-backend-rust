@@ -33,6 +33,7 @@ pub async fn list_workspaces(
         .map(|row| WorkspaceSummary {
             short_hash: workspace_short_hash(&row.workspace_id),
             workspace_id: row.workspace_id,
+            workspace_name: row.workspace_name,
             visible_note_count: row.visible_note_count,
             latest_note_created_at: row.latest_note_created_at,
         })

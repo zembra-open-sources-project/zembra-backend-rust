@@ -6,6 +6,8 @@ pub const LEGACY_FIXED_WORKSPACE_ID: &str = "00000000-0000-4000-8000-00000000030
 pub struct WorkspaceSummaryRow {
     /// Full workspace identifier.
     pub workspace_id: String,
+    /// Human-readable workspace name, or `None` when the schema row has no name.
+    pub workspace_name: Option<String>,
     /// Count of visible notes in this workspace.
     pub visible_note_count: i64,
     /// Creation timestamp of the latest visible note, or `None` for empty workspaces.
@@ -41,6 +43,7 @@ impl WorkspacesRepository {
     pub async fn list_summaries(&self) -> Result<Vec<WorkspaceSummaryRow>, sqlx::Error> {
         sqlx::query_as::<_, WorkspaceSummaryRow>(
             "SELECT workspaces.id AS workspace_id,
+                    workspaces.workspace_name AS workspace_name,
                     COUNT(notes.id) AS visible_note_count,
                     MAX(notes.created_at) AS latest_note_created_at
              FROM workspaces
@@ -48,7 +51,7 @@ impl WorkspacesRepository {
                ON notes.workspace_id = workspaces.id
               AND notes.deleted_at IS NULL
               AND notes.archived_at IS NULL
-             GROUP BY workspaces.id
+             GROUP BY workspaces.id, workspaces.workspace_name
              ORDER BY visible_note_count DESC,
                       latest_note_created_at IS NULL ASC,
                       latest_note_created_at DESC,
@@ -70,4 +73,22 @@ impl WorkspacesRepository {
 /// Returns the first 8 characters after removing UUID hyphens.
 pub fn workspace_short_hash(workspace_id: &str) -> String {
     workspace_id.replace('-', "").chars().take(8).collect()
+}
+
+/// Validates and normalizes a workspace name entered by a user.
+///
+/// # Arguments
+///
+/// * `workspace_name` - Raw workspace name input.
+///
+/// # Returns
+///
+/// Returns a trimmed workspace name when it is non-empty and contains no whitespace.
+pub fn validate_workspace_name(workspace_name: &str) -> Option<String> {
+    let trimmed = workspace_name.trim();
+    if trimmed.is_empty() || workspace_name.chars().any(char::is_whitespace) {
+        return None;
+    }
+
+    Some(trimmed.to_string())
 }

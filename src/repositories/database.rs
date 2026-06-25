@@ -122,6 +122,37 @@ impl Database {
             .is_ok()
     }
 
+    /// Assigns a name to the initial unnamed workspace in a newly created local database.
+    ///
+    /// # Arguments
+    ///
+    /// * `workspace_name` - Validated workspace name to store.
+    ///
+    /// # Returns
+    ///
+    /// Returns `Ok(())` when the first unnamed workspace has been updated.
+    pub async fn assign_initial_workspace_name(
+        &self,
+        workspace_name: &str,
+    ) -> Result<(), sqlx::Error> {
+        sqlx::query(
+            "UPDATE workspaces
+             SET workspace_name = ?, updated_at = unixepoch()
+             WHERE id = (
+                 SELECT id
+                 FROM workspaces
+                 WHERE workspace_name IS NULL
+                 ORDER BY created_at ASC, id ASC
+                 LIMIT 1
+             )",
+        )
+        .bind(workspace_name)
+        .execute(&self.pool)
+        .await?;
+
+        Ok(())
+    }
+
     /// Migrates the legacy fixed workspace identifier to a locally generated UUID.
     ///
     /// # Returns
