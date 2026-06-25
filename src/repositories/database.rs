@@ -163,6 +163,10 @@ impl Database {
             return Ok(());
         }
 
+        if database_has_notes(&self.pool).await? {
+            return Ok(());
+        }
+
         let exists =
             sqlx::query_scalar::<_, i64>("SELECT EXISTS(SELECT 1 FROM workspaces WHERE id = ?)")
                 .bind(LEGACY_FIXED_WORKSPACE_ID)
@@ -195,6 +199,29 @@ impl Database {
 /// Returns `true` for file-backed databases and `false` for in-memory test databases.
 fn should_migrate_legacy_workspace(database_url: &str) -> bool {
     !database_url.trim().contains(":memory:")
+}
+
+/// Checks whether the local database already contains notes.
+///
+/// # Arguments
+///
+/// * `executor` - SQLx executor used to query the local notes table.
+///
+/// # Returns
+///
+/// Returns `true` when at least one note exists.
+async fn database_has_notes<'e, E>(executor: E) -> Result<bool, sqlx::Error>
+where
+    E: Executor<'e, Database = sqlx::Sqlite> + Copy,
+{
+    if !table_exists(executor, "notes").await? {
+        return Ok(false);
+    }
+
+    let exists = sqlx::query_scalar::<_, i64>("SELECT EXISTS(SELECT 1 FROM notes LIMIT 1)")
+        .fetch_one(executor)
+        .await?;
+    Ok(exists == 1)
 }
 
 /// Creates migration metadata for databases that already contain shared tables.
@@ -403,6 +430,7 @@ fn ensure_parent_directory(database_url: &str) -> Result<(), std::io::Error> {
 #[cfg(test)]
 mod tests {
     use super::{Database, schema_version_exists};
+    use crate::repositories::workspaces::LEGACY_FIXED_WORKSPACE_ID;
 
     /// Creates a legacy in-memory database missing migration metadata.
     ///
@@ -461,5 +489,35 @@ mod tests {
                 .await
                 .unwrap()
         );
+    }
+
+    #[tokio::test]
+    async fn legacy_workspace_migration_skips_database_with_notes() {
+        let database = Database::connect("sqlite://:memory:").await.unwrap();
+        sqlx::query(
+            "INSERT INTO notes (id, workspace_id, content, role, created_at, updated_at)
+             VALUES ('note-1', ?, 'existing', 'Human', 100, 100)",
+        )
+        .bind(LEGACY_FIXED_WORKSPACE_ID)
+        .execute(&database.pool)
+        .await
+        .unwrap();
+
+        database.migrate_legacy_fixed_workspace().await.unwrap();
+
+        let workspace_exists =
+            sqlx::query_scalar::<_, i64>("SELECT EXISTS(SELECT 1 FROM workspaces WHERE id = ?)")
+                .bind(LEGACY_FIXED_WORKSPACE_ID)
+                .fetch_one(&database.pool)
+                .await
+                .unwrap();
+        let note_workspace =
+            sqlx::query_scalar::<_, String>("SELECT workspace_id FROM notes WHERE id = 'note-1'")
+                .fetch_one(&database.pool)
+                .await
+                .unwrap();
+
+        assert_eq!(workspace_exists, 1);
+        assert_eq!(note_workspace, LEGACY_FIXED_WORKSPACE_ID);
     }
 }
