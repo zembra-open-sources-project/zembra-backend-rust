@@ -411,13 +411,17 @@ fn newer_target(
     remote_changes: &HashMap<(String, String), i64>,
 ) -> Option<SyncWriteTarget> {
     let key = (entity_type.to_string(), entity_id.to_string());
-    let local_created_at = local_changes.get(&key)?;
-    let remote_created_at = remote_changes.get(&key)?;
-
-    match local_created_at.cmp(remote_created_at) {
-        std::cmp::Ordering::Greater => Some(SyncWriteTarget::Remote),
-        std::cmp::Ordering::Less => Some(SyncWriteTarget::Local),
-        std::cmp::Ordering::Equal => None,
+    match (local_changes.get(&key), remote_changes.get(&key)) {
+        (Some(local_created_at), Some(remote_created_at)) => {
+            match local_created_at.cmp(remote_created_at) {
+                std::cmp::Ordering::Greater => Some(SyncWriteTarget::Remote),
+                std::cmp::Ordering::Less => Some(SyncWriteTarget::Local),
+                std::cmp::Ordering::Equal => None,
+            }
+        }
+        (Some(_), None) => Some(SyncWriteTarget::Remote),
+        (None, Some(_)) => Some(SyncWriteTarget::Local),
+        (None, None) => None,
     }
 }
 
@@ -511,6 +515,29 @@ mod tests {
         remote
             .sync_changes
             .push(change("remote-change", "note", "note-1", 10));
+
+        let diff = diff_snapshots(&local, &remote);
+
+        assert!(diff.write_remote.iter().any(|row| {
+            row.table == SyncTableName::Notes
+                && row.key == "note-1"
+                && row.target == SyncWriteTarget::Remote
+        }));
+        assert!(diff.conflicts.is_empty());
+    }
+
+    #[test]
+    fn diff_snapshots_pushes_local_row_when_remote_change_is_missing() {
+        let mut local = SyncTableSnapshot::default();
+        let mut deleted = note("note-1", "local");
+        deleted.updated_at = 20;
+        deleted.deleted_at = Some(20);
+        local.notes.push(deleted);
+        local
+            .sync_changes
+            .push(change("local-delete", "note", "note-1", 20));
+        let mut remote = SyncTableSnapshot::default();
+        remote.notes.push(note("note-1", "remote"));
 
         let diff = diff_snapshots(&local, &remote);
 
