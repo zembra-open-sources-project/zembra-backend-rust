@@ -43,6 +43,30 @@ pub struct TaxonomyRepository {
     pool: SqlitePool,
 }
 
+/// Error returned when deleting a field is rejected before persistence.
+#[derive(Debug, thiserror::Error)]
+pub enum DeleteFieldError {
+    /// The requested field does not exist in the workspace.
+    #[error("Field \"{field_id}\" did not match any field in workspace \"{workspace_id}\".")]
+    NotFound {
+        /// Workspace searched for the field.
+        workspace_id: String,
+        /// Field identifier supplied by the client.
+        field_id: String,
+    },
+    /// The field is still referenced by visible notes.
+    #[error("Field \"{field_id}\" is still used by {visible_note_count} visible note(s).")]
+    InUse {
+        /// Field identifier supplied by the client.
+        field_id: String,
+        /// Number of visible notes using the field.
+        visible_note_count: i64,
+    },
+    /// SQLite operation failed while deleting the field.
+    #[error("Database operation failed.")]
+    Database(#[from] sqlx::Error),
+}
+
 impl TaxonomyRepository {
     /// Creates a taxonomy repository backed by a SQLite pool.
     ///
@@ -120,6 +144,97 @@ impl TaxonomyRepository {
     /// Returns tag records ordered by name.
     pub async fn list_tags(&self, limit: Option<i64>) -> Result<Vec<TagRecord>, sqlx::Error> {
         list_tags_with_pool(&self.pool, limit).await
+    }
+
+    /// Deletes a field only when no visible notes still use it.
+    ///
+    /// # Arguments
+    ///
+    /// * `workspace_id` - Active workspace identifier used as the deletion scope.
+    /// * `field_id` - Field identifier to delete.
+    ///
+    /// # Returns
+    ///
+    /// Returns `Ok(())` after deleting the field.
+    pub async fn delete_unused_field(
+        &self,
+        workspace_id: &str,
+        field_id: &str,
+    ) -> Result<(), DeleteFieldError> {
+        let mut transaction = self.pool.begin().await?;
+        let field = sqlx::query_as::<_, FieldRecord>(
+            "SELECT id, name, created_at FROM fields WHERE workspace_id = ? AND id = ?",
+        )
+        .bind(workspace_id)
+        .bind(field_id)
+        .fetch_optional(&mut *transaction)
+        .await?;
+
+        let Some(field) = field else {
+            return Err(DeleteFieldError::NotFound {
+                workspace_id: workspace_id.to_string(),
+                field_id: field_id.to_string(),
+            });
+        };
+
+        let visible_note_count = sqlx::query_scalar::<_, i64>(
+            "SELECT COUNT(*) FROM notes \
+             WHERE workspace_id = ? \
+               AND field_id = ? \
+               AND deleted_at IS NULL \
+               AND archived_at IS NULL",
+        )
+        .bind(workspace_id)
+        .bind(field_id)
+        .fetch_one(&mut *transaction)
+        .await?;
+
+        if visible_note_count > 0 {
+            return Err(DeleteFieldError::InUse {
+                field_id: field_id.to_string(),
+                visible_note_count,
+            });
+        }
+
+        sqlx::query(
+            "UPDATE notes SET field_id = NULL \
+             WHERE workspace_id = ? \
+               AND field_id = ? \
+               AND (deleted_at IS NOT NULL OR archived_at IS NOT NULL)",
+        )
+        .bind(workspace_id)
+        .bind(field_id)
+        .execute(&mut *transaction)
+        .await?;
+
+        sqlx::query("DELETE FROM fields WHERE workspace_id = ? AND id = ?")
+            .bind(workspace_id)
+            .bind(field_id)
+            .execute(&mut *transaction)
+            .await?;
+
+        record_sync_change_in_transaction(
+            &mut transaction,
+            SyncChangeInput {
+                workspace_id: workspace_id.to_string(),
+                entity_type: "field",
+                entity_id: field.id.clone(),
+                operation: "delete",
+                base_revision_id: None,
+                new_revision_id: None,
+                payload: serde_json::json!({
+                    "id": field.id,
+                    "workspace_id": workspace_id,
+                    "name": field.name,
+                    "created_at": field.created_at
+                }),
+            },
+        )
+        .await?;
+
+        transaction.commit().await?;
+
+        Ok(())
     }
 }
 

@@ -52,6 +52,9 @@ pub enum ApiError {
     /// Note reference matched multiple records.
     #[error("{0}")]
     AmbiguousNoteReference(String),
+    /// Request conflicts with the current resource state.
+    #[error("{0}")]
+    Conflict(String),
     /// Database is not available for serving requests.
     #[allow(dead_code)]
     #[error("Database is not initialized.")]
@@ -86,7 +89,7 @@ impl ApiError {
                 StatusCode::UNPROCESSABLE_ENTITY
             }
             Self::RecordNotFound(_) => StatusCode::NOT_FOUND,
-            Self::AmbiguousNoteReference(_) => StatusCode::CONFLICT,
+            Self::AmbiguousNoteReference(_) | Self::Conflict(_) => StatusCode::CONFLICT,
             Self::DatabaseNotInitialized => StatusCode::SERVICE_UNAVAILABLE,
             Self::SyncDisabled => StatusCode::SERVICE_UNAVAILABLE,
             Self::InvalidConfig(_) => StatusCode::BAD_REQUEST,
@@ -109,6 +112,7 @@ impl ApiError {
             Self::InvalidNoteReference => "invalid_note_reference",
             Self::RecordNotFound(_) => "record_not_found",
             Self::AmbiguousNoteReference(_) => "ambiguous_note_reference",
+            Self::Conflict(_) => "conflict",
             Self::DatabaseNotInitialized => "database_not_initialized",
             Self::Database(_) => "database_error",
             Self::SyncDisabled => "sync_disabled",

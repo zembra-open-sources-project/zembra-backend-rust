@@ -233,3 +233,35 @@ pub async fn set_created_at(state: &AppState, note_id: &str, created_at: i64) {
         .await
         .unwrap();
 }
+
+/// Updates a note archive timestamp directly for visibility tests.
+///
+/// # Arguments
+///
+/// * `state` - Shared application state.
+/// * `note_id` - Note ID to update.
+/// * `archived_at` - Optional archive timestamp value to write.
+pub async fn set_archived_at(state: &AppState, note_id: &str, archived_at: Option<i64>) {
+    sqlx::query("UPDATE notes SET archived_at = ? WHERE id = ?")
+        .bind(archived_at)
+        .bind(note_id)
+        .execute(&state.database.pool)
+        .await
+        .unwrap();
+}
+
+/// Updates a note deletion timestamp directly for visibility tests.
+///
+/// # Arguments
+///
+/// * `state` - Shared application state.
+/// * `note_id` - Note ID to update.
+/// * `deleted_at` - Optional deletion timestamp value to write.
+pub async fn set_deleted_at(state: &AppState, note_id: &str, deleted_at: Option<i64>) {
+    sqlx::query("UPDATE notes SET deleted_at = ? WHERE id = ?")
+        .bind(deleted_at)
+        .bind(note_id)
+        .execute(&state.database.pool)
+        .await
+        .unwrap();
+}

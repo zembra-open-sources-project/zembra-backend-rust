@@ -169,3 +169,241 @@ async fn patch_note_rejects_blank_field() {
     assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
     assert_eq!(body["error"]["code"], "validation_error");
 }
+
+#[tokio::test]
+async fn delete_field_removes_field_without_visible_notes() {
+    let state = support::app::test_state().await;
+    let note_id = support::notes::create_field_note(&state, "old", "unused").await;
+    support::notes::set_archived_at(&state, &note_id, Some(9_999_999_999)).await;
+    let field_id = field_id_by_name(&state, "unused").await;
+
+    let response = support::app::send_with_state(
+        state.clone(),
+        Request::builder()
+            .method("POST")
+            .uri("/fields/delete")
+            .header("content-type", "application/json")
+            .body(Body::from(
+                json!({
+                    "workspace_id": DEFAULT_WORKSPACE_ID,
+                    "field_id": field_id
+                })
+                .to_string(),
+            ))
+            .unwrap(),
+    )
+    .await;
+    let status = response.status();
+    let body = support::app::response_json(response).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let field_exists = field_exists(&state, body["field_id"].as_str().unwrap()).await;
+    let delete_change_count =
+        field_delete_sync_change_count(&state, body["field_id"].as_str().unwrap()).await;
+
+    assert_eq!(body["deleted"], true);
+    assert_eq!(field_exists, 0);
+    assert_eq!(delete_change_count, 1);
+}
+
+#[tokio::test]
+async fn delete_field_rejects_field_with_visible_notes() {
+    let state = support::app::test_state().await;
+    support::notes::create_field_note(&state, "old", "work").await;
+    let field_id = field_id_by_name(&state, "work").await;
+
+    let response = support::app::send_with_state(
+        state.clone(),
+        Request::builder()
+            .method("POST")
+            .uri("/fields/delete")
+            .header("content-type", "application/json")
+            .body(Body::from(
+                json!({
+                    "workspace_id": DEFAULT_WORKSPACE_ID,
+                    "field_id": field_id
+                })
+                .to_string(),
+            ))
+            .unwrap(),
+    )
+    .await;
+    let status = response.status();
+
+    assert_eq!(status, StatusCode::CONFLICT);
+    let body = support::app::response_json(response).await;
+    assert_eq!(body["error"]["code"], "conflict");
+    assert_eq!(field_exists(&state, &field_id).await, 1);
+}
+
+#[tokio::test]
+async fn delete_field_ignores_deleted_notes_when_counting_usage() {
+    let state = support::app::test_state().await;
+    let note_id = support::notes::create_field_note(&state, "old", "unused").await;
+    support::notes::set_deleted_at(&state, &note_id, Some(9_999_999_999)).await;
+    let field_id = field_id_by_name(&state, "unused").await;
+
+    let response = support::app::send_with_state(
+        state.clone(),
+        Request::builder()
+            .method("POST")
+            .uri("/fields/delete")
+            .header("content-type", "application/json")
+            .body(Body::from(
+                json!({
+                    "workspace_id": DEFAULT_WORKSPACE_ID,
+                    "field_id": field_id
+                })
+                .to_string(),
+            ))
+            .unwrap(),
+    )
+    .await;
+    let status = response.status();
+    let body = support::app::response_json(response).await;
+
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(field_exists(&state, &field_id).await, 0);
+}
+
+#[tokio::test]
+async fn delete_field_returns_not_found_for_missing_field() {
+    let state = support::app::test_state().await;
+
+    let response = support::app::send_with_state(
+        state,
+        Request::builder()
+            .method("POST")
+            .uri("/fields/delete")
+            .header("content-type", "application/json")
+            .body(Body::from(
+                json!({
+                    "workspace_id": DEFAULT_WORKSPACE_ID,
+                    "field_id": "00000000-0000-4000-8000-000000000999"
+                })
+                .to_string(),
+            ))
+            .unwrap(),
+    )
+    .await;
+
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn delete_field_returns_not_found_for_inactive_workspace() {
+    let state = support::app::test_state().await;
+    let field_id = "00000000-0000-4000-8000-000000000999";
+
+    let response = support::app::send_with_state(
+        state,
+        Request::builder()
+            .method("POST")
+            .uri("/fields/delete")
+            .header("content-type", "application/json")
+            .body(Body::from(
+                json!({
+                    "workspace_id": "00000000-0000-4000-8000-000000000998",
+                    "field_id": field_id
+                })
+                .to_string(),
+            ))
+            .unwrap(),
+    )
+    .await;
+
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn delete_field_returns_validation_error_for_missing_body_field() {
+    let state = support::app::test_state().await;
+
+    let response = support::app::send_with_state(
+        state,
+        Request::builder()
+            .method("POST")
+            .uri("/fields/delete")
+            .header("content-type", "application/json")
+            .body(Body::from(
+                json!({
+                    "workspace_id": DEFAULT_WORKSPACE_ID
+                })
+                .to_string(),
+            ))
+            .unwrap(),
+    )
+    .await;
+    let status = response.status();
+
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+    let body = support::app::response_json(response).await;
+    assert_eq!(body["error"]["code"], "validation_error");
+}
+
+/// Returns the field id for a field name in the default test workspace.
+///
+/// # Arguments
+///
+/// * `state` - Shared application state.
+/// * `name` - Field name to look up.
+///
+/// # Returns
+///
+/// Returns the field id.
+async fn field_id_by_name(state: &zembra_backend_rust::app::AppState, name: &str) -> String {
+    sqlx::query_scalar::<_, String>("SELECT id FROM fields WHERE workspace_id = ? AND name = ?")
+        .bind(DEFAULT_WORKSPACE_ID)
+        .bind(name)
+        .fetch_one(&state.database.pool)
+        .await
+        .unwrap()
+}
+
+/// Returns whether a field row exists in the default test workspace.
+///
+/// # Arguments
+///
+/// * `state` - Shared application state.
+/// * `field_id` - Field id to check.
+///
+/// # Returns
+///
+/// Returns `1` when the field exists, otherwise `0`.
+async fn field_exists(state: &zembra_backend_rust::app::AppState, field_id: &str) -> i64 {
+    sqlx::query_scalar::<_, i64>(
+        "SELECT EXISTS(SELECT 1 FROM fields WHERE workspace_id = ? AND id = ?)",
+    )
+    .bind(DEFAULT_WORKSPACE_ID)
+    .bind(field_id)
+    .fetch_one(&state.database.pool)
+    .await
+    .unwrap()
+}
+
+/// Counts field delete sync changes for a field in the default test workspace.
+///
+/// # Arguments
+///
+/// * `state` - Shared application state.
+/// * `field_id` - Field id to check.
+///
+/// # Returns
+///
+/// Returns the number of matching delete sync changes.
+async fn field_delete_sync_change_count(
+    state: &zembra_backend_rust::app::AppState,
+    field_id: &str,
+) -> i64 {
+    sqlx::query_scalar::<_, i64>(
+        "SELECT COUNT(*) FROM sync_changes \
+         WHERE workspace_id = ? \
+           AND entity_type = 'field' \
+           AND entity_id = ? \
+           AND operation = 'delete'",
+    )
+    .bind(DEFAULT_WORKSPACE_ID)
+    .bind(field_id)
+    .fetch_one(&state.database.pool)
+    .await
+    .unwrap()
+}

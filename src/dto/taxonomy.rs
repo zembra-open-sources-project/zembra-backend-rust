@@ -1,5 +1,6 @@
 use serde::{Deserialize, Serialize};
 use utoipa::{IntoParams, ToSchema};
+use validator::Validate;
 
 use crate::models::field::FieldRecord;
 use crate::models::tag::TagRecord;
@@ -35,6 +36,28 @@ pub struct ListFieldsResponse {
     pub fields: Vec<FieldRecord>,
     /// Field names in the same order as `fields`.
     pub names: Vec<String>,
+}
+
+/// Request body for deleting an unused field.
+#[derive(Debug, Clone, Deserialize, Validate, ToSchema)]
+pub struct DeleteFieldRequest {
+    /// Workspace UUID used as the deletion scope.
+    #[serde(default)]
+    #[validate(length(min = 1))]
+    pub workspace_id: String,
+    /// Field identifier to delete.
+    #[serde(default)]
+    #[validate(length(min = 1))]
+    pub field_id: String,
+}
+
+/// Response body for a successful field deletion.
+#[derive(Debug, Clone, Serialize, ToSchema)]
+pub struct DeleteFieldResponse {
+    /// Identifier of the deleted field.
+    pub field_id: String,
+    /// Whether the field was deleted by this request.
+    pub deleted: bool,
 }
 
 /// Response body for listing tags.

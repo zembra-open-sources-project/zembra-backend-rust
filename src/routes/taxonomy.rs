@@ -1,5 +1,5 @@
 use axum::Router;
-use axum::routing::get;
+use axum::routing::{get, post};
 
 /// Builds routes for field and tag lookup.
 ///
@@ -9,5 +9,9 @@ use axum::routing::get;
 pub fn router() -> Router<crate::app::AppState> {
     Router::new()
         .route("/fields", get(crate::handlers::taxonomy::list_fields))
+        .route(
+            "/fields/delete",
+            post(crate::handlers::taxonomy::delete_field),
+        )
         .route("/tags", get(crate::handlers::taxonomy::list_tags))
 }

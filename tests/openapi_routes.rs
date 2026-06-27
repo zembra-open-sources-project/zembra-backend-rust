@@ -25,6 +25,7 @@ async fn openapi_json_lists_runtime_api_paths() {
     assert!(body["paths"].get("/random/fields").is_some());
     assert!(body["paths"].get("/notes/batch").is_some());
     assert!(body["paths"].get("/fields").is_some());
+    assert!(body["paths"].get("/fields/delete").is_some());
     assert!(body["paths"].get("/tags").is_some());
     assert!(body["paths"].get("/workspaces").is_some());
     assert!(body["paths"].get("/sync/status").is_some());
@@ -106,6 +107,16 @@ async fn openapi_json_lists_runtime_api_paths() {
     assert!(
         body["components"]["schemas"]["WorkspaceSummary"]["properties"]
             .get("workspace_name")
+            .is_some()
+    );
+    assert!(
+        body["components"]["schemas"]["DeleteFieldRequest"]["properties"]
+            .get("workspace_id")
+            .is_some()
+    );
+    assert!(
+        body["paths"]["/fields/delete"]["post"]["responses"]
+            .get("409")
             .is_some()
     );
 
