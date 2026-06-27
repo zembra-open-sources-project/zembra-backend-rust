@@ -1,6 +1,7 @@
 use sqlx::{Sqlite, Transaction};
 
 use super::SyncRepository;
+use crate::sync::diff::{SyncDiffAction, SyncDiffActionKind, SyncTableName};
 use crate::sync::table_snapshot::*;
 
 impl SyncRepository {
@@ -55,6 +56,149 @@ impl SyncRepository {
 
         transaction.commit().await
     }
+
+    /// Applies local delete actions selected by lifecycle diffing.
+    ///
+    /// # Arguments
+    ///
+    /// * `actions` - Lifecycle actions to apply locally.
+    /// * `local` - Current local snapshot used to resolve workspace-scoped keys.
+    ///
+    /// # Returns
+    ///
+    /// Returns `Ok(())` after all local delete actions are committed.
+    pub async fn delete_local_actions(
+        &self,
+        actions: &[SyncDiffAction],
+        local: &SyncTableSnapshot,
+    ) -> Result<(), sqlx::Error> {
+        let mut transaction = self.pool.begin().await?;
+
+        for action in actions
+            .iter()
+            .filter(|action| action.kind == SyncDiffActionKind::DeleteLocal)
+        {
+            match action.table {
+                SyncTableName::Fields => {
+                    let Some(row) = local.fields.iter().find(|row| row.id == action.key) else {
+                        continue;
+                    };
+                    delete_field_in_transaction(&mut transaction, &row.workspace_id, &row.id)
+                        .await?;
+                }
+                SyncTableName::NoteTags => {
+                    let Some(row) = local
+                        .note_tags
+                        .iter()
+                        .find(|row| note_tag_key(row) == action.key)
+                    else {
+                        continue;
+                    };
+                    delete_note_tag_in_transaction(
+                        &mut transaction,
+                        &row.workspace_id,
+                        &row.note_id,
+                        &row.tag_id,
+                    )
+                    .await?;
+                }
+                SyncTableName::NoteLinks => {
+                    let Some(row) = local.note_links.iter().find(|row| row.id == action.key) else {
+                        continue;
+                    };
+                    delete_note_link_in_transaction(&mut transaction, &row.workspace_id, &row.id)
+                        .await?;
+                }
+                _ => {
+                    return Err(sqlx::Error::InvalidArgument(format!(
+                        "unsupported local delete action for {:?}",
+                        action.table
+                    )));
+                }
+            }
+        }
+
+        transaction.commit().await
+    }
+}
+
+/// Deletes a field in a transaction after enforcing visible-note protection.
+async fn delete_field_in_transaction(
+    transaction: &mut Transaction<'_, Sqlite>,
+    workspace_id: &str,
+    field_id: &str,
+) -> Result<(), sqlx::Error> {
+    let visible_note_count = sqlx::query_scalar::<_, i64>(
+        "SELECT COUNT(*) FROM notes \
+         WHERE workspace_id = ? \
+           AND field_id = ? \
+           AND deleted_at IS NULL \
+           AND archived_at IS NULL",
+    )
+    .bind(workspace_id)
+    .bind(field_id)
+    .fetch_one(&mut **transaction)
+    .await?;
+
+    if visible_note_count > 0 {
+        return Err(sqlx::Error::InvalidArgument(format!(
+            "cannot sync-delete field {field_id}: visible_note_count={visible_note_count}"
+        )));
+    }
+
+    sqlx::query(
+        "UPDATE notes SET field_id = NULL \
+         WHERE workspace_id = ? \
+           AND field_id = ? \
+           AND (deleted_at IS NOT NULL OR archived_at IS NOT NULL)",
+    )
+    .bind(workspace_id)
+    .bind(field_id)
+    .execute(&mut **transaction)
+    .await?;
+
+    sqlx::query("DELETE FROM fields WHERE workspace_id = ? AND id = ?")
+        .bind(workspace_id)
+        .bind(field_id)
+        .execute(&mut **transaction)
+        .await?;
+
+    Ok(())
+}
+
+/// Deletes a note tag relation in a transaction.
+async fn delete_note_tag_in_transaction(
+    transaction: &mut Transaction<'_, Sqlite>,
+    workspace_id: &str,
+    note_id: &str,
+    tag_id: &str,
+) -> Result<(), sqlx::Error> {
+    sqlx::query("DELETE FROM note_tags WHERE workspace_id = ? AND note_id = ? AND tag_id = ?")
+        .bind(workspace_id)
+        .bind(note_id)
+        .bind(tag_id)
+        .execute(&mut **transaction)
+        .await?;
+    Ok(())
+}
+
+/// Deletes a note link relation in a transaction.
+async fn delete_note_link_in_transaction(
+    transaction: &mut Transaction<'_, Sqlite>,
+    workspace_id: &str,
+    link_id: &str,
+) -> Result<(), sqlx::Error> {
+    sqlx::query("DELETE FROM note_links WHERE workspace_id = ? AND id = ?")
+        .bind(workspace_id)
+        .bind(link_id)
+        .execute(&mut **transaction)
+        .await?;
+    Ok(())
+}
+
+/// Returns the composite note tag key used by lifecycle actions.
+fn note_tag_key(row: &NoteTagSnapshotRow) -> String {
+    format!("{}:{}:{}", row.workspace_id, row.note_id, row.tag_id)
 }
 
 /// Upserts a workspace row.

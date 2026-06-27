@@ -1,6 +1,7 @@
 use super::{SyncChangeRecord, SyncRepository};
 use crate::repositories::database::Database;
 use crate::repositories::taxonomy::DEFAULT_WORKSPACE_ID;
+use crate::sync::diff::{SyncDiffAction, SyncDiffActionKind, SyncTableName};
 use crate::sync::table_snapshot::{
     DeviceSnapshotRow, FieldSnapshotRow, NoteRevisionSnapshotRow, NoteSnapshotRow,
     SyncChangeSnapshotRow, SyncTableSnapshot, WorkspaceSnapshotRow,
@@ -505,6 +506,55 @@ async fn write_local_table_snapshot_upserts_remote_rows() {
             .iter()
             .any(|row| row.id == "change-remote")
     );
+}
+
+#[tokio::test]
+async fn delete_local_actions_deletes_field_and_clears_hidden_note_reference() {
+    let database = Database::connect("sqlite://:memory:").await.unwrap();
+    let repository = SyncRepository::new(database.pool.clone());
+    sqlx::query(
+        "INSERT INTO fields (id, workspace_id, name, created_at) VALUES ('field-delete', ?, 'Delete', 1)",
+    )
+    .bind(DEFAULT_WORKSPACE_ID)
+    .execute(&database.pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO notes \
+         (id, workspace_id, content, role, field_id, created_at, updated_at, archived_at, deleted_at, conflict_status) \
+         VALUES ('hidden-note', ?, 'hidden', 'Human', 'field-delete', 1, 1, 2, NULL, 'none')",
+    )
+    .bind(DEFAULT_WORKSPACE_ID)
+    .execute(&database.pool)
+    .await
+    .unwrap();
+    let snapshot = repository.read_local_table_snapshot().await.unwrap();
+    let actions = vec![SyncDiffAction {
+        kind: SyncDiffActionKind::DeleteLocal,
+        table: SyncTableName::Fields,
+        key: "field-delete".to_string(),
+        reason: "test".to_string(),
+    }];
+
+    repository
+        .delete_local_actions(&actions, &snapshot)
+        .await
+        .unwrap();
+
+    let field_count =
+        sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM fields WHERE id = 'field-delete'")
+            .fetch_one(&database.pool)
+            .await
+            .unwrap();
+    let note_field_id = sqlx::query_scalar::<_, Option<String>>(
+        "SELECT field_id FROM notes WHERE id = 'hidden-note'",
+    )
+    .fetch_one(&database.pool)
+    .await
+    .unwrap();
+
+    assert_eq!(field_count, 0);
+    assert_eq!(note_field_id, None);
 }
 
 #[tokio::test]

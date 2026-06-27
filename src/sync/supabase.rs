@@ -4,8 +4,10 @@ use serde::{Deserialize, Serialize};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::repositories::sync::SyncChangeRecord;
+use crate::sync::diff::{SyncDiffAction, SyncDiffActionKind, SyncTableName};
 use crate::sync::table_snapshot::{
-    NoteLinkSnapshotRow, NoteTagSnapshotRow, SyncChangeSnapshotRow, SyncTableSnapshot,
+    FieldSnapshotRow, NoteLinkSnapshotRow, NoteTagSnapshotRow, SyncChangeSnapshotRow,
+    SyncTableSnapshot,
 };
 
 const SUPABASE_PAGE_SIZE: usize = 1000;
@@ -248,6 +250,76 @@ impl SupabaseClient {
         ensure_success(response).await
     }
 
+    /// Applies remote delete actions selected by lifecycle diffing.
+    ///
+    /// # Arguments
+    ///
+    /// * `actions` - Lifecycle actions to apply remotely.
+    /// * `remote` - Current remote snapshot used to resolve workspace-scoped keys.
+    ///
+    /// # Returns
+    ///
+    /// Returns `Ok(())` after Supabase accepts all delete requests.
+    pub async fn delete_remote_actions(
+        &self,
+        actions: &[SyncDiffAction],
+        remote: &SyncTableSnapshot,
+    ) -> Result<(), SupabaseError> {
+        for action in actions
+            .iter()
+            .filter(|action| action.kind == SyncDiffActionKind::DeleteRemote)
+        {
+            match action.table {
+                SyncTableName::Fields => {
+                    let Some(row) = remote.fields.iter().find(|row| row.id == action.key) else {
+                        continue;
+                    };
+                    self.delete_field(row).await?;
+                }
+                SyncTableName::NoteTags => {
+                    let Some(row) = remote
+                        .note_tags
+                        .iter()
+                        .find(|row| note_tag_key(row) == action.key)
+                    else {
+                        continue;
+                    };
+                    self.delete_note_tag(row).await?;
+                }
+                SyncTableName::NoteLinks => {
+                    let Some(row) = remote.note_links.iter().find(|row| row.id == action.key)
+                    else {
+                        continue;
+                    };
+                    self.delete_note_link(row).await?;
+                }
+                _ => {
+                    return Err(SupabaseError::InvalidAction(format!(
+                        "unsupported remote delete action for {:?}",
+                        action.table
+                    )));
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Deletes a field row from Supabase.
+    ///
+    /// # Arguments
+    ///
+    /// * `row` - Field row key to delete.
+    ///
+    /// # Returns
+    ///
+    /// Returns `Ok(())` after Supabase accepts the delete.
+    pub async fn delete_field(&self, row: &FieldSnapshotRow) -> Result<(), SupabaseError> {
+        let request = self.build_delete_field_request(row)?;
+        let response = self.client.execute(request).await?;
+        ensure_success(response).await
+    }
+
     /// Builds an upsert request for sync changes.
     ///
     /// # Arguments
@@ -468,6 +540,30 @@ impl SupabaseClient {
                 ("workspace_id", format!("eq.{}", row.workspace_id)),
                 ("note_id", format!("eq.{}", row.note_id)),
                 ("tag_id", format!("eq.{}", row.tag_id)),
+            ])
+            .build()
+            .map_err(Into::into)
+    }
+
+    /// Builds a field delete request.
+    ///
+    /// # Arguments
+    ///
+    /// * `row` - Field row key to delete.
+    ///
+    /// # Returns
+    ///
+    /// Returns a request ready to execute.
+    pub fn build_delete_field_request(
+        &self,
+        row: &FieldSnapshotRow,
+    ) -> Result<reqwest::Request, SupabaseError> {
+        self.client
+            .delete(format!("{}/rest/v1/fields", self.base_url))
+            .headers(self.headers()?)
+            .query(&[
+                ("workspace_id", format!("eq.{}", row.workspace_id)),
+                ("id", format!("eq.{}", row.id)),
             ])
             .build()
             .map_err(Into::into)
@@ -796,9 +892,17 @@ fn supabase_snapshot_changes(changes: &[SyncChangeSnapshotRow]) -> Vec<SupabaseS
         .collect()
 }
 
+/// Returns the composite note tag key used by lifecycle actions.
+fn note_tag_key(row: &NoteTagSnapshotRow) -> String {
+    format!("{}:{}:{}", row.workspace_id, row.note_id, row.tag_id)
+}
+
 /// Error returned by Supabase synchronization requests.
 #[derive(Debug, thiserror::Error)]
 pub enum SupabaseError {
+    /// Supabase action cannot be represented with the current sync contract.
+    #[error("invalid Supabase sync action: {0}")]
+    InvalidAction(String),
     /// Service role key could not be encoded as an HTTP header.
     #[error("invalid Supabase secret key")]
     InvalidSecretKey,
@@ -1027,6 +1131,24 @@ mod tests {
         assert!(url.starts_with("https://example.supabase.co/rest/v1/note_links?"));
         assert!(url.contains("workspace_id=eq."));
         assert!(url.contains("id=eq.link-1"));
+    }
+
+    #[test]
+    fn field_delete_request_filters_workspace_and_id() {
+        let client = SupabaseClient::new("https://example.supabase.co", "sb_secret_test-key");
+        let row = FieldSnapshotRow {
+            id: "field-1".to_string(),
+            workspace_id: crate::repositories::taxonomy::DEFAULT_WORKSPACE_ID.to_string(),
+            name: "field".to_string(),
+            created_at: 123,
+        };
+        let request = client.build_delete_field_request(&row).unwrap();
+        let url = request.url().as_str();
+
+        assert_eq!(request.method(), reqwest::Method::DELETE);
+        assert!(url.starts_with("https://example.supabase.co/rest/v1/fields?"));
+        assert!(url.contains("workspace_id=eq."));
+        assert!(url.contains("id=eq.field-1"));
     }
 
     #[test]

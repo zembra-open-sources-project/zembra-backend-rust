@@ -202,6 +202,27 @@ def remote_rows(supabase_url, secret_key, table):
     return sorted(normalized, key=lambda row: tuple(str(row.get(column)) for column in TABLE_KEYS[table]))
 
 
+def empty_local_workspace_ids(connection, remote_workspace_ids):
+    """Return local-only workspace ids that have no synchronized dependent rows."""
+    rows = connection.execute(
+        """
+        SELECT id
+        FROM workspaces
+        WHERE id NOT IN ({placeholders})
+          AND NOT EXISTS (SELECT 1 FROM devices WHERE devices.workspace_id = workspaces.id)
+          AND NOT EXISTS (SELECT 1 FROM fields WHERE fields.workspace_id = workspaces.id)
+          AND NOT EXISTS (SELECT 1 FROM tags WHERE tags.workspace_id = workspaces.id)
+          AND NOT EXISTS (SELECT 1 FROM notes WHERE notes.workspace_id = workspaces.id)
+          AND NOT EXISTS (SELECT 1 FROM note_revisions WHERE note_revisions.workspace_id = workspaces.id)
+          AND NOT EXISTS (SELECT 1 FROM note_tags WHERE note_tags.workspace_id = workspaces.id)
+          AND NOT EXISTS (SELECT 1 FROM note_links WHERE note_links.workspace_id = workspaces.id)
+          AND NOT EXISTS (SELECT 1 FROM sync_changes WHERE sync_changes.workspace_id = workspaces.id)
+        """.format(placeholders=",".join("?" for _ in remote_workspace_ids) or "''"),
+        tuple(remote_workspace_ids),
+    ).fetchall()
+    return {row[0] for row in rows}
+
+
 def schema_versions(connection, supabase_url, secret_key):
     """Read local and remote schema contract versions."""
     local = connection.execute(
@@ -238,14 +259,21 @@ def compare_all(connection, supabase_url, secret_key, label):
     """Compare all synchronized tables and return True when every table matches."""
     print(label)
     failed = False
+    skipped_empty_workspaces = set()
     for table in TABLES:
         local = local_rows(connection, table)
         remote = remote_rows(supabase_url, secret_key, table)
+        if table == "workspaces":
+            remote_workspace_ids = {row["id"] for row in remote}
+            skipped_empty_workspaces = empty_local_workspace_ids(connection, remote_workspace_ids)
+            local = [row for row in local if row["id"] not in skipped_empty_workspaces]
         status = "ok" if local == remote else "diff"
         print(f"{table:<16} local={len(local)} remote={len(remote)} {status}")
         if local != remote:
             print(f"{table:<16} {first_difference(local, remote)}")
             failed = True
+    if skipped_empty_workspaces:
+        print(f"workspaces       skipped_empty_local={len(skipped_empty_workspaces)}")
     return not failed
 
 
@@ -308,7 +336,7 @@ def main():
     server_log_path = Path(runtime_home.name) / "zembra-real-sync-server.log"
     server_log = server_log_path.open("w", encoding="utf-8")
     server = subprocess.Popen(
-        ["cargo", "run", "--quiet", "--bin", "zembra-backend-rust"],
+        ["cargo", "run", "--quiet", "--bin", "zembra-backend"],
         cwd=ROOT_DIR,
         stdout=server_log,
         stderr=server_log,

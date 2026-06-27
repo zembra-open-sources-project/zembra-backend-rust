@@ -1,6 +1,6 @@
 use crate::config::SyncSettings;
 use crate::repositories::sync::{SyncRepository, SyncStateRecord};
-use crate::sync::diff::{SyncDiffConflict, diff_snapshots};
+use crate::sync::diff::{SyncDiffActionKind, SyncDiffConflict, diff_snapshots};
 use crate::sync::schema_contract::{SchemaContractVersions, TARGET_SCHEMA_CONTRACT_VERSION};
 use crate::sync::schema_migration::{SchemaMigrationError, apply_remote_schema_contract};
 use crate::sync::supabase::{SupabaseClient, SupabaseError};
@@ -86,9 +86,24 @@ impl SyncService {
         let (local, remote) = self.read_snapshots(&supabase).await?;
         let diff = diff_snapshots(&local, &remote);
         self.ensure_no_conflicts(&diff.conflicts)?;
-        let write_remote = local.subset_for_diffs(&diff.write_remote);
-        let processed = write_remote.row_count();
-        self.write_remote_snapshot(&supabase, &write_remote).await?;
+        let outbound_snapshot = local.subset_for_actions(
+            &diff.actions,
+            &[
+                SyncDiffActionKind::UpsertRemote,
+                SyncDiffActionKind::SyncChangeRemote,
+            ],
+        );
+        let processed = outbound_snapshot.row_count()
+            + diff
+                .actions
+                .iter()
+                .filter(|action| action.kind == SyncDiffActionKind::DeleteRemote)
+                .count();
+        self.write_remote_snapshot(&supabase, &outbound_snapshot)
+            .await?;
+        supabase
+            .delete_remote_actions(&diff.actions, &remote)
+            .await?;
         self.verify_direction_converged(&supabase, SyncDirection::Push)
             .await?;
         Ok(SyncDirectionSummary { processed })
@@ -108,10 +123,24 @@ impl SyncService {
         let (local, remote) = self.read_snapshots(&supabase).await?;
         let diff = diff_snapshots(&local, &remote);
         self.ensure_no_conflicts(&diff.conflicts)?;
-        let write_local = remote.subset_for_diffs(&diff.write_local);
-        let processed = write_local.row_count();
+        let inbound_snapshot = remote.subset_for_actions(
+            &diff.actions,
+            &[
+                SyncDiffActionKind::UpsertLocal,
+                SyncDiffActionKind::SyncChangeLocal,
+            ],
+        );
+        let processed = inbound_snapshot.row_count()
+            + diff
+                .actions
+                .iter()
+                .filter(|action| action.kind == SyncDiffActionKind::DeleteLocal)
+                .count();
         self.repository
-            .write_local_table_snapshot(&write_local)
+            .write_local_table_snapshot(&inbound_snapshot)
+            .await?;
+        self.repository
+            .delete_local_actions(&diff.actions, &local)
             .await?;
         self.verify_direction_converged(&supabase, SyncDirection::Pull)
             .await?;
@@ -158,18 +187,50 @@ impl SyncService {
         let diff = diff_snapshots(&local, &remote);
         self.ensure_no_conflicts(&diff.conflicts)?;
 
-        let write_local = remote.subset_for_diffs(&diff.write_local);
-        let write_remote = local.subset_for_diffs(&diff.write_remote);
-        let pulled = write_local.row_count();
-        let pushed = write_remote.row_count();
+        let inbound_snapshot = remote.subset_for_actions(
+            &diff.actions,
+            &[
+                SyncDiffActionKind::UpsertLocal,
+                SyncDiffActionKind::SyncChangeLocal,
+            ],
+        );
+        let outbound_snapshot = local.subset_for_actions(
+            &diff.actions,
+            &[
+                SyncDiffActionKind::UpsertRemote,
+                SyncDiffActionKind::SyncChangeRemote,
+            ],
+        );
+        let pulled = inbound_snapshot.row_count();
+        let pushed = outbound_snapshot.row_count();
 
         self.repository
-            .write_local_table_snapshot(&write_local)
+            .write_local_table_snapshot(&inbound_snapshot)
             .await?;
-        self.write_remote_snapshot(&supabase, &write_remote).await?;
+        self.write_remote_snapshot(&supabase, &outbound_snapshot)
+            .await?;
+        self.repository
+            .delete_local_actions(&diff.actions, &local)
+            .await?;
+        supabase
+            .delete_remote_actions(&diff.actions, &remote)
+            .await?;
         self.verify_converged(&supabase).await?;
 
-        Ok(TableSyncSummary { pushed, pulled })
+        Ok(TableSyncSummary {
+            pushed: pushed
+                + diff
+                    .actions
+                    .iter()
+                    .filter(|action| action.kind == SyncDiffActionKind::DeleteRemote)
+                    .count(),
+            pulled: pulled
+                + diff
+                    .actions
+                    .iter()
+                    .filter(|action| action.kind == SyncDiffActionKind::DeleteLocal)
+                    .count(),
+        })
     }
 
     /// Reads local and Supabase synchronized table snapshots.
@@ -295,13 +356,34 @@ impl SyncService {
     async fn verify_converged(&self, supabase: &SupabaseClient) -> Result<(), SyncError> {
         let (local, remote) = self.read_snapshots(supabase).await?;
         let diff = diff_snapshots(&local, &remote);
-        if diff.write_local.is_empty() && diff.write_remote.is_empty() && diff.conflicts.is_empty()
-        {
+        if diff.actions.is_empty() && diff.conflicts.is_empty() {
             Ok(())
         } else {
             Err(SyncError::NotConverged {
-                write_local: diff.write_local.len(),
-                write_remote: diff.write_remote.len(),
+                local_actions: diff
+                    .actions
+                    .iter()
+                    .filter(|action| {
+                        matches!(
+                            action.kind,
+                            SyncDiffActionKind::UpsertLocal
+                                | SyncDiffActionKind::DeleteLocal
+                                | SyncDiffActionKind::SyncChangeLocal
+                        )
+                    })
+                    .count(),
+                remote_actions: diff
+                    .actions
+                    .iter()
+                    .filter(|action| {
+                        matches!(
+                            action.kind,
+                            SyncDiffActionKind::UpsertRemote
+                                | SyncDiffActionKind::DeleteRemote
+                                | SyncDiffActionKind::SyncChangeRemote
+                        )
+                    })
+                    .count(),
                 conflicts: diff.conflicts.len(),
             })
         }
@@ -325,16 +407,60 @@ impl SyncService {
         let (local, remote) = self.read_snapshots(supabase).await?;
         let diff = diff_snapshots(&local, &remote);
         let remaining = match direction {
-            SyncDirection::Push => diff.write_remote.len(),
-            SyncDirection::Pull => diff.write_local.len(),
+            SyncDirection::Push => diff
+                .actions
+                .iter()
+                .filter(|action| {
+                    matches!(
+                        action.kind,
+                        SyncDiffActionKind::UpsertRemote
+                            | SyncDiffActionKind::DeleteRemote
+                            | SyncDiffActionKind::SyncChangeRemote
+                    )
+                })
+                .count(),
+            SyncDirection::Pull => diff
+                .actions
+                .iter()
+                .filter(|action| {
+                    matches!(
+                        action.kind,
+                        SyncDiffActionKind::UpsertLocal
+                            | SyncDiffActionKind::DeleteLocal
+                            | SyncDiffActionKind::SyncChangeLocal
+                    )
+                })
+                .count(),
         };
 
         if remaining == 0 && diff.conflicts.is_empty() {
             Ok(())
         } else {
             Err(SyncError::NotConverged {
-                write_local: diff.write_local.len(),
-                write_remote: diff.write_remote.len(),
+                local_actions: diff
+                    .actions
+                    .iter()
+                    .filter(|action| {
+                        matches!(
+                            action.kind,
+                            SyncDiffActionKind::UpsertLocal
+                                | SyncDiffActionKind::DeleteLocal
+                                | SyncDiffActionKind::SyncChangeLocal
+                        )
+                    })
+                    .count(),
+                remote_actions: diff
+                    .actions
+                    .iter()
+                    .filter(|action| {
+                        matches!(
+                            action.kind,
+                            SyncDiffActionKind::UpsertRemote
+                                | SyncDiffActionKind::DeleteRemote
+                                | SyncDiffActionKind::SyncChangeRemote
+                        )
+                    })
+                    .count(),
                 conflicts: diff.conflicts.len(),
             })
         }
@@ -426,13 +552,13 @@ pub enum SyncError {
     },
     /// Post-write verification found remaining differences.
     #[error(
-        "synchronization did not converge: write_local={write_local}, write_remote={write_remote}, conflicts={conflicts}"
+        "synchronization did not converge: local_actions={local_actions}, remote_actions={remote_actions}, conflicts={conflicts}"
     )]
     NotConverged {
-        /// Remaining rows that would be written to local.
-        write_local: usize,
-        /// Remaining rows that would be written to remote.
-        write_remote: usize,
+        /// Remaining actions that target local SQLite.
+        local_actions: usize,
+        /// Remaining actions that target Supabase.
+        remote_actions: usize,
         /// Remaining conflict count.
         conflicts: usize,
     },

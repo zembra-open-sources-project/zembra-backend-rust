@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use crate::sync::diff::{SyncTableDiff, SyncTableName};
+use crate::sync::diff::{SyncDiffAction, SyncDiffActionKind, SyncTableName};
 
 /// Complete local or remote data snapshot for the synchronized tables.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -26,59 +26,65 @@ pub struct SyncTableSnapshot {
 }
 
 impl SyncTableSnapshot {
-    /// Returns a new snapshot containing only rows referenced by differences.
+    /// Returns a new snapshot containing only rows referenced by selected actions.
     ///
     /// # Arguments
     ///
-    /// * `diffs` - Row differences whose keys should be copied.
+    /// * `actions` - Actions whose row keys should be copied.
+    /// * `kinds` - Action kinds to include.
     ///
     /// # Returns
     ///
     /// Returns a partial snapshot in the same table order.
-    pub fn subset_for_diffs(&self, diffs: &[SyncTableDiff]) -> Self {
+    pub fn subset_for_actions(
+        &self,
+        actions: &[SyncDiffAction],
+        kinds: &[SyncDiffActionKind],
+    ) -> Self {
         Self {
             workspaces: self
                 .workspaces
                 .iter()
-                .filter(|row| has_diff(diffs, SyncTableName::Workspaces, &row.id))
+                .filter(|row| has_action(actions, kinds, SyncTableName::Workspaces, &row.id))
                 .cloned()
                 .collect(),
             devices: self
                 .devices
                 .iter()
-                .filter(|row| has_diff(diffs, SyncTableName::Devices, &row.id))
+                .filter(|row| has_action(actions, kinds, SyncTableName::Devices, &row.id))
                 .cloned()
                 .collect(),
             fields: self
                 .fields
                 .iter()
-                .filter(|row| has_diff(diffs, SyncTableName::Fields, &row.id))
+                .filter(|row| has_action(actions, kinds, SyncTableName::Fields, &row.id))
                 .cloned()
                 .collect(),
             tags: self
                 .tags
                 .iter()
-                .filter(|row| has_diff(diffs, SyncTableName::Tags, &row.id))
+                .filter(|row| has_action(actions, kinds, SyncTableName::Tags, &row.id))
                 .cloned()
                 .collect(),
             notes: self
                 .notes
                 .iter()
-                .filter(|row| has_diff(diffs, SyncTableName::Notes, &row.id))
+                .filter(|row| has_action(actions, kinds, SyncTableName::Notes, &row.id))
                 .cloned()
                 .collect(),
             note_revisions: self
                 .note_revisions
                 .iter()
-                .filter(|row| has_diff(diffs, SyncTableName::NoteRevisions, &row.id))
+                .filter(|row| has_action(actions, kinds, SyncTableName::NoteRevisions, &row.id))
                 .cloned()
                 .collect(),
             note_tags: self
                 .note_tags
                 .iter()
                 .filter(|row| {
-                    has_diff(
-                        diffs,
+                    has_action(
+                        actions,
+                        kinds,
                         SyncTableName::NoteTags,
                         &format!("{}:{}:{}", row.workspace_id, row.note_id, row.tag_id),
                     )
@@ -88,13 +94,13 @@ impl SyncTableSnapshot {
             note_links: self
                 .note_links
                 .iter()
-                .filter(|row| has_diff(diffs, SyncTableName::NoteLinks, &row.id))
+                .filter(|row| has_action(actions, kinds, SyncTableName::NoteLinks, &row.id))
                 .cloned()
                 .collect(),
             sync_changes: self
                 .sync_changes
                 .iter()
-                .filter(|row| has_diff(diffs, SyncTableName::SyncChanges, &row.id))
+                .filter(|row| has_action(actions, kinds, SyncTableName::SyncChanges, &row.id))
                 .cloned()
                 .collect(),
         }
@@ -118,21 +124,27 @@ impl SyncTableSnapshot {
     }
 }
 
-/// Checks whether a row key appears in a diff list.
+/// Checks whether a row key appears in a selected action list.
 ///
 /// # Arguments
 ///
-/// * `diffs` - Differences to search.
+/// * `actions` - Actions to search.
+/// * `kinds` - Action kinds to include.
 /// * `table` - Table name to match.
 /// * `key` - Row key to match.
 ///
 /// # Returns
 ///
 /// Returns `true` when the row should be included.
-fn has_diff(diffs: &[SyncTableDiff], table: SyncTableName, key: &str) -> bool {
-    diffs
+fn has_action(
+    actions: &[SyncDiffAction],
+    kinds: &[SyncDiffActionKind],
+    table: SyncTableName,
+    key: &str,
+) -> bool {
+    actions
         .iter()
-        .any(|diff| diff.table == table && diff.key == key)
+        .any(|action| kinds.contains(&action.kind) && action.table == table && action.key == key)
 }
 
 /// Workspace snapshot row.
